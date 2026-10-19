@@ -266,6 +266,24 @@
   .lock .btn { padding: 11px 14px; font-size: 15px; }
   .lock .err { min-height: 20px; }
 
+  .v3-canvas { width: 100%; aspect-ratio: 16 / 10; max-height: 62vh; display: block; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2); touch-action: none; cursor: grab; }
+  .v3-canvas:active { cursor: grabbing; }
+  .v3-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .v3-bar .seg { grid-template-columns: repeat(4, 1fr); margin: 0; flex: 1 1 280px; }
+  .v3-info { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 8px; }
+  .v3-info div { background: var(--surface-2); border-radius: 10px; padding: 9px 12px; display: grid; gap: 2px; }
+  .v3-info span { font-size: 12px; color: var(--muted); }
+  .v3-info b { font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+  .ar-ui { position: fixed; inset: 0; z-index: 80; display: none; pointer-events: none; color: #fff; }
+  .ar-ui.on { display: flex; flex-direction: column; justify-content: space-between; align-items: center; padding: max(14px, env(safe-area-inset-top)) 14px max(18px, env(safe-area-inset-bottom)); }
+  .ar-top { background: rgba(0, 0, 0, .55); border-radius: 12px; padding: 8px 14px; text-align: center; display: grid; gap: 2px; font-size: 13px; }
+  .ar-msg { background: rgba(0, 0, 0, .55); border-radius: 999px; padding: 8px 14px; font-size: 14px; text-align: center; margin-top: auto; margin-bottom: 12px; }
+  .ar-bottom { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; pointer-events: auto; }
+  .ar-btn { border: 0; border-radius: 999px; padding: 12px 16px; font-size: 15px; font-weight: 600; background: rgba(255, 255, 255, .92); color: #18181b; min-width: 48px; }
+  .ar-btn.primary { background: #3d63e6; color: #fff; }
+  .ar-btn:disabled { opacity: .5; }
+
   .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--surface); padding: 10px 18px; border-radius: 999px; z-index: 40; display: none; max-width: 90vw; font-size: 14px; box-shadow: var(--shadow-lg); }
   .toast.show { display: block; }
 
@@ -302,6 +320,7 @@
     .modal { padding: 0; align-items: flex-end; }
     .modal-box, .modal-box.wide { max-height: 94vh; border-radius: 18px 18px 0 0; }
     .swatches { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px 10px; }
+    .v3-canvas { aspect-ratio: 1 / 1; }
     /* Calculator on phones: results pinned at the top, inputs in two columns */
     .calc { gap: 12px; }
     .calc-head p { display: none; }
@@ -672,13 +691,14 @@ function openDetail(id) {
         ${vars.map(variantRow).join("")}
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <button class="add ${sel ? "on" : ""}" data-toggle="${esc(id)}" data-reopen="1">${sel ? "✓ Añadida" : "+ Añadir a la selección"}</button>
+          ${has3D(p) ? `<button class="btn small" data-view3d="${esc(id)}">Ver en 3D</button>` : ""}
           ${canEdit() ? `<button class="btn small" data-edit="${esc(id)}">Editar</button>` : ""}
         </div>
       </div>
     </div>`;
   $("modal").classList.add("open");
 }
-function closeModal() { $("modal").classList.remove("open"); $("modalBox").classList.remove("wide"); }
+function closeModal() { stop3D(); $("modal").classList.remove("open"); $("modalBox").classList.remove("wide"); }
 
 // ---------- Editor ----------
 let draft = null;   // { id, isNew, product, stock }
@@ -1043,7 +1063,7 @@ function renderCalc() {
 const SUN = '<svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M4.6 4.6l1.4 1.4M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4 6 18M18 6l1.4-1.4"/></svg>';
 const MOON = '<svg class="i" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5Z"/></svg>';
 const isDark = () => getComputedStyle(document.documentElement).colorScheme.includes("dark");
-function renderThemeBtn() { $("themeBtn").innerHTML = isDark() ? SUN : MOON; }
+function renderThemeBtn() { $("themeBtn").innerHTML = isDark() ? SUN : MOON; if (V3) request3D(); }
 
 // ---------- Cushion colours ----------
 const CUSHIONS = [
@@ -1519,11 +1539,388 @@ async function publishApp() {
   } finally { btn.disabled = false; btn.textContent = "Publicar app en GitHub"; }
 }
 
+// ---------- 3D size viewer ----------
+// Orthographic view of the machine's bounding box (real length × width × height) on a 50 cm floor grid, with a
+// 1.75 m person for scale and an optional use/safety zone around it. Plain canvas: no libraries, works offline.
+const CLEARANCES = [[0, "Sin zona"], [0.3, "30 cm"], [0.6, "60 cm"], [1, "1 m"]];
+let V3 = null;
+const has3D = p => { const d = p.dims || {}; return d.l > 0 && d.w > 0 && d.h > 0; };
+const meters = n => n.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " m";
+const sqm = n => n.toLocaleString("es-ES", { maximumFractionDigits: 2 }) + " m²";
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+
+function open3D(id) {
+  const p = byId[id];
+  if (!p || !has3D(p)) return;
+  stop3D();
+  let clear = 0.6;
+  try { const c = parseFloat(localStorage.getItem("dmonte-clear")); if (CLEARANCES.some(x => x[0] === c)) clear = c; } catch {}
+  V3 = { p, L: p.dims.l / 1000, W: p.dims.w / 1000, H: p.dims.h / 1000, clear, az: -0.6, el: 0.5, zoom: 1, img: null, ptrs: new Map(), raf: 0 };
+  $("modalBox").classList.add("wide");
+  $("modalBox").innerHTML = `
+    <div class="calc">
+      <div class="calc-head">
+        <div><h3>Vista 3D · ${esc(p.model)}</h3><p>${esc(p.name)}</p></div>
+        <button class="icon-btn" data-close aria-label="Cerrar">×</button>
+      </div>
+      <canvas id="v3c" class="v3-canvas" role="img" aria-label="Espacio que ocupa ${esc(p.model)} en 3D"></canvas>
+      <div class="v3-bar">
+        <div class="seg" role="group" aria-label="Zona de uso">${CLEARANCES.map(([v, l]) => `<button type="button" data-clear="${v}" aria-pressed="${v === clear}">${l}</button>`).join("")}</div>
+        <button type="button" class="btn accent small" id="arBtn" hidden>Ver en mi sala (cámara)</button>
+        <button type="button" class="btn small" id="v3reset">Restablecer vista</button>
+        <button type="button" class="btn ghost small" data-back3d="${esc(id)}">Volver a la ficha</button>
+      </div>
+      <p class="hint" style="margin:0">Arrastra para girar; rueda o pellizco para acercar. La caja tiene las medidas máximas de la máquina; la persona mide 1,75 m.</p>
+      <p class="hint" id="arHint" style="margin:0" hidden>La vista con cámara (ver la máquina en tu sala) funciona en móviles Android con Chrome, abriendo la web publicada.</p>
+      <div class="v3-info" id="v3info"></div>
+    </div>`;
+  $("modal").classList.add("open");
+  info3D();
+  setupARButton();
+
+  const c = $("v3c");
+  c.addEventListener("pointerdown", e => { c.setPointerCapture(e.pointerId); V3.ptrs.set(e.pointerId, [e.clientX, e.clientY]); });
+  c.addEventListener("pointermove", e => {
+    if (!V3 || !V3.ptrs.has(e.pointerId)) return;
+    const prev = V3.ptrs.get(e.pointerId), cur = [e.clientX, e.clientY];
+    if (V3.ptrs.size === 1) {
+      V3.az += (cur[0] - prev[0]) * 0.01;
+      V3.el = clamp(V3.el + (cur[1] - prev[1]) * 0.006, 0.08, 1.3);
+    } else if (V3.ptrs.size === 2) {   // pinch
+      const other = [...V3.ptrs.values()].find(v => v !== prev);
+      const d0 = Math.hypot(prev[0] - other[0], prev[1] - other[1]), d1 = Math.hypot(cur[0] - other[0], cur[1] - other[1]);
+      if (d0 > 0) V3.zoom = clamp(V3.zoom * d1 / d0, 0.5, 4);
+    }
+    V3.ptrs.set(e.pointerId, cur);
+    request3D();
+  });
+  const up = e => { if (V3) V3.ptrs.delete(e.pointerId); };
+  c.addEventListener("pointerup", up); c.addEventListener("pointercancel", up);
+  c.addEventListener("wheel", e => { e.preventDefault(); V3.zoom = clamp(V3.zoom * Math.exp(-e.deltaY * 0.0015), 0.5, 4); request3D(); }, { passive: false });
+  c.addEventListener("dblclick", reset3D);
+  V3.ro = new ResizeObserver(() => request3D());
+  V3.ro.observe(c);
+
+  (async () => {   // the photo goes on the long faces of the box
+    const src = isEnc(p.img) ? await loadImg(p.img.slice(4)) : p.img;
+    if (!src || src === BLANK) return;
+    const im = new Image();
+    im.onload = () => { if (V3 && V3.p === p) { V3.img = im; request3D(); } };
+    im.src = src;
+  })();
+}
+
+function stop3D() {
+  if (V3) { if (V3.ro) V3.ro.disconnect(); cancelAnimationFrame(V3.raf); }
+  V3 = null;
+}
+function reset3D() { if (!V3) return; V3.az = -0.6; V3.el = 0.5; V3.zoom = 1; request3D(); }
+function request3D() { if (V3 && !V3.raf) V3.raf = requestAnimationFrame(() => { if (V3) { V3.raf = 0; draw3D(); } }); }
+
+function setClearance(v) {
+  V3.clear = v;
+  try { localStorage.setItem("dmonte-clear", String(v)); } catch {}
+  document.querySelectorAll("[data-clear]").forEach(b => b.setAttribute("aria-pressed", +b.dataset.clear === v));
+  info3D(); request3D();
+}
+
+function info3D() {
+  const { L, W, H, clear, p } = V3;
+  const rows = [
+    ["Medidas (largo × ancho × alto)", `${meters(L)} × ${meters(W)} × ${meters(H)}`],
+    ["Superficie que ocupa", sqm(L * W)],
+  ];
+  if (clear) rows.push([`Con zona de uso de ${CLEARANCES.find(c => c[0] === clear)[1]}`, `${meters(L + 2 * clear)} × ${meters(W + 2 * clear)} = ${sqm((L + 2 * clear) * (W + 2 * clear))}`]);
+  if (p.weight) rows.push(["Peso", `${String(p.weight).replace(".", ",")} kg`]);
+  $("v3info").innerHTML = rows.map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join("");
+}
+
+function draw3D() {
+  const c = $("v3c");
+  if (!V3 || !c) return;
+  const dpr = window.devicePixelRatio || 1, cw = c.clientWidth, ch = c.clientHeight;
+  if (!cw || !ch) return;
+  if (c.width !== Math.round(cw * dpr) || c.height !== Math.round(ch * dpr)) { c.width = Math.round(cw * dpr); c.height = Math.round(ch * dpr); }
+  const g = c.getContext("2d");
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, cw, ch);
+  const css = getComputedStyle(document.documentElement), tok = n => css.getPropertyValue(n).trim(), dark = isDark();
+  const { L, W, H, clear, az, el } = V3;
+  const ca = Math.cos(az), sa = Math.sin(az), ce = Math.cos(el), se = Math.sin(el);
+
+  // Scene: box from (0,0,0) to (L,W,H), x = length, y = width, z = up; the person stands to the right of the box
+  const px = L + clear + 0.45, py = W / 2;
+  const snap = (v, up) => (up ? Math.ceil(v / 0.5) : Math.floor(v / 0.5)) * 0.5;   // floor area aligned to the 50 cm grid
+  const ext = { x0: snap(-clear - 0.25), x1: snap(px + 0.45, 1), y0: snap(-clear - 0.25), y1: snap(W + clear + 0.25, 1) };
+  const mx = (ext.x0 + ext.x1) / 2, my = (ext.y0 + ext.y1) / 2, top = Math.max(H, 1.85), mz = top / 2;
+  // Scale fitted to the scene as seen from the default angle, so it stays constant while rotating
+  const fit = (() => {
+    const a = Math.cos(-0.6), b = Math.sin(-0.6), e1 = Math.cos(0.5), e2 = Math.sin(0.5);
+    const pts = [[ext.x0, ext.y0, 0], [ext.x1, ext.y0, 0], [ext.x1, ext.y1, 0], [ext.x0, ext.y1, 0], [0, 0, H], [L, 0, H], [L, W, H], [0, W, H], [px, py, 1.95]];
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    for (const [x, y, z] of pts) {
+      const X = x - mx, Y = y - my, sx = X * a - Y * b, sy = -(X * b + Y * a) * e2 - (z - mz) * e1;
+      x0 = Math.min(x0, sx); x1 = Math.max(x1, sx); y0 = Math.min(y0, sy); y1 = Math.max(y1, sy);
+    }
+    return { k: Math.min(cw / (x1 - x0), ch / (y1 - y0)), ox: (x0 + x1) / 2, oy: (y0 + y1) / 2 };
+  })();
+  const S = fit.k * 0.9 * V3.zoom;
+  const P = (x, y, z) => {   // orthographic projection -> [screen x, screen y, depth (bigger = closer)]
+    const X = x - mx, Y = y - my, xr = X * ca - Y * sa, yr = X * sa + Y * ca;
+    return [cw / 2 + (xr - fit.ox) * S, ch / 2 + (-yr * se - (z - mz) * ce - fit.oy) * S, -yr * ce + z * se];
+  };
+  const poly = pts => { g.beginPath(); pts.forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); g.closePath(); };
+
+  // Floor grid, 50 cm cells (darker every metre)
+  const step = 0.5, gx0 = ext.x0, gx1 = ext.x1, gy0 = ext.y0, gy1 = ext.y1;
+  g.lineWidth = 1;
+  const line = (a, b, strong) => { g.strokeStyle = dark ? (strong ? "rgba(255,255,255,.14)" : "rgba(255,255,255,.06)") : (strong ? "rgba(0,0,0,.14)" : "rgba(0,0,0,.06)"); g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.stroke(); };
+  const whole = v => Math.abs(v - Math.round(v)) < 1e-6;
+  for (let x = gx0; x <= gx1 + 1e-9; x += step) line(P(x, gy0, 0), P(x, gy1, 0), whole(x));
+  for (let y = gy0; y <= gy1 + 1e-9; y += step) line(P(gx0, y, 0), P(gx1, y, 0), whole(y));
+
+  // Use zone and footprint
+  if (clear) {
+    poly([P(-clear, -clear, 0), P(L + clear, -clear, 0), P(L + clear, W + clear, 0), P(-clear, W + clear, 0)]);
+    g.fillStyle = dark ? "rgba(61,99,230,.18)" : "rgba(20,56,176,.10)"; g.fill();
+    g.setLineDash([6, 4]); g.strokeStyle = tok("--accent"); g.lineWidth = 1.5; g.stroke(); g.setLineDash([]);
+  }
+  poly([P(0, 0, 0), P(L, 0, 0), P(L, W, 0), P(0, W, 0)]);
+  g.fillStyle = dark ? "rgba(0,0,0,.45)" : "rgba(0,0,0,.12)"; g.fill();
+
+  // Person (billboard) drawn before or after the box depending on which is closer
+  const feet = P(px, py, 0), boxMid = P(L / 2, W / 2, H / 2);
+  const person = () => {
+    g.save(); g.translate(feet[0], feet[1]); g.scale(S, -S * ce);
+    g.fillStyle = dark ? "rgba(244,244,245,.55)" : "rgba(24,24,27,.5)";
+    const rr = (x, y, w, h, r) => { g.beginPath(); g.roundRect ? g.roundRect(x, y, w, h, r) : g.rect(x, y, w, h); g.fill(); };
+    g.beginPath(); g.ellipse(0, 1.63, 0.11, 0.11, 0, 0, Math.PI * 2); g.fill();
+    rr(-0.2, 0.86, 0.4, 0.64, 0.08);
+    rr(-0.18, 0, 0.16, 0.92, 0.06); rr(0.02, 0, 0.16, 0.92, 0.06);
+    rr(-0.3, 0.84, 0.09, 0.64, 0.045); rr(0.21, 0.84, 0.09, 0.64, 0.045);
+    g.restore();
+    label(feet[0], feet[1] - 1.9 * S * ce - 4, "1,75 m");
+  };
+  const label = (x, y, text) => {
+    g.font = "600 12px Inter, 'Segoe UI', system-ui, sans-serif";
+    const w = g.measureText(text).width + 12;
+    g.fillStyle = dark ? "rgba(24,24,27,.9)" : "rgba(255,255,255,.92)";
+    g.beginPath(); g.roundRect ? g.roundRect(x - w / 2, y - 10, w, 20, 10) : g.rect(x - w / 2, y - 10, w, 20); g.fill();
+    g.fillStyle = tok("--ink"); g.textAlign = "center"; g.textBaseline = "middle"; g.fillText(text, x, y + 0.5);
+  };
+  if (feet[2] < boxMid[2]) person();
+
+  // Box: only the faces turned towards the viewer (convex, so no sorting needed)
+  const faces = [
+    { n: [0, -1, 0], pts: [[0, 0, H], [L, 0, H], [L, 0, 0], [0, 0, 0]], photo: true },
+    { n: [0, 1, 0], pts: [[L, W, H], [0, W, H], [0, W, 0], [L, W, 0]], photo: true },
+    { n: [-1, 0, 0], pts: [[0, W, H], [0, 0, H], [0, 0, 0], [0, W, 0]] },
+    { n: [1, 0, 0], pts: [[L, 0, H], [L, W, H], [L, W, 0], [L, 0, 0]] },
+    { n: [0, 0, 1], pts: [[0, W, H], [L, W, H], [L, 0, H], [0, 0, H]], top: true },
+  ];
+  const edge = dark ? "rgba(255,255,255,.45)" : "rgba(0,0,0,.4)";
+  for (const f of faces) {
+    const [nx, ny, nz] = f.n, nyr = nx * sa + ny * ca;
+    if (-nyr * ce + nz * se <= 1e-6) continue;
+    const pts = f.pts.map(q => P(...q));
+    poly(pts);
+    g.fillStyle = f.photo ? tok("--img-bg") : f.top ? (dark ? "#3a3a41" : "#f0f0ec") : (dark ? "#2c2c32" : "#dcdcd7");
+    g.fill();
+    if (f.photo && V3.img) {
+      const im = V3.img, ia = im.naturalWidth / im.naturalHeight, fw = L, fh = H;
+      let w = fw * 0.94, h = w / ia;
+      if (h > fh * 0.94) { h = fh * 0.94; w = h * ia; }
+      const u = [(pts[1][0] - pts[0][0]) / fw, (pts[1][1] - pts[0][1]) / fw], v = [(pts[3][0] - pts[0][0]) / fh, (pts[3][1] - pts[0][1]) / fh];
+      g.save(); poly(pts); g.clip();
+      g.setTransform(dpr * u[0], dpr * u[1], dpr * v[0], dpr * v[1], dpr * pts[0][0], dpr * pts[0][1]);
+      g.drawImage(im, (fw - w) / 2, (fh - h) / 2, w, h);
+      g.restore();
+    }
+    poly(pts); g.strokeStyle = edge; g.lineWidth = 1.5; g.stroke();
+  }
+  if (feet[2] >= boxMid[2]) person();
+
+  // Dimensions on the edges closest to the viewer
+  const centre = P(L / 2, W / 2, 0);
+  const tag = (a, b, text) => {
+    const m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], d = [m[0] - centre[0], m[1] - centre[1]], k = 18 / (Math.hypot(...d) || 1);
+    label(m[0] + d[0] * k, m[1] + d[1] * k, text);
+  };
+  const near = (e1, e2) => (P(...e1[0])[2] + P(...e1[1])[2] >= P(...e2[0])[2] + P(...e2[1])[2] ? e1 : e2);
+  const eL = near([[0, 0, 0], [L, 0, 0]], [[0, W, 0], [L, W, 0]]), eW = near([[0, 0, 0], [0, W, 0]], [[L, 0, 0], [L, W, 0]]);
+  tag(P(...eL[0]), P(...eL[1]), meters(L));
+  tag(P(...eW[0]), P(...eW[1]), meters(W));
+  const corners = [[0, 0], [L, 0], [L, W], [0, W]].map(([x, y]) => [P(x, y, 0), P(x, y, H)]).sort((a, b) => a[0][0] - b[0][0]);
+  const [b0, t0] = corners[0];
+  label(b0[0] - 30, (b0[1] + t0[1]) / 2, meters(H));
+}
+
+// ---------- Camera / augmented reality (WebXR) ----------
+// Android Chrome with ARCore, on the published https copy: the phone detects the floor and the machine's bounding box
+// (plus the use zone) is drawn at real size where the user places it. Minimal WebGL, no libraries.
+const AR = { session: null, gl: null, prog: null, bufs: null, hitSource: null, ref: null, hit: null, placed: null, yaw: 0, ui: null };
+
+async function arSupported() {
+  try { return !!(navigator.xr && window.isSecureContext && await navigator.xr.isSessionSupported("immersive-ar")); } catch { return false; }
+}
+
+// 4x4 column-major matrices
+const m4 = {
+  mul(a, b) { const o = new Float32Array(16); for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) { let s = 0; for (let k = 0; k < 4; k++) s += a[k * 4 + r] * b[c * 4 + k]; o[c * 4 + r] = s; } return o; },
+  place(x, y, z, yaw) { const c = Math.cos(yaw), s = Math.sin(yaw); return new Float32Array([c, 0, -s, 0, 0, 1, 0, 0, s, 0, c, 0, x, y, z, 1]); },
+};
+
+// Geometry in metres, box centred on the origin and standing on the floor (y up); vertices are [x, y, z, r, g, b, a]
+function arGeometry(L, W, H, clear) {
+  const a = [0.24, 0.39, 0.9], hx = L / 2, hz = W / 2;
+  const v = (x, y, z, c, al) => [x, y, z, c[0], c[1], c[2], al];
+  const quad = (p, c, al) => [p[0], p[1], p[2], p[0], p[2], p[3]].flatMap(q => v(...q, c, al));
+  const box = [
+    quad([[-hx, 0, hz], [hx, 0, hz], [hx, H, hz], [-hx, H, hz]], a, 0.32), quad([[hx, 0, -hz], [-hx, 0, -hz], [-hx, H, -hz], [hx, H, -hz]], a, 0.32),
+    quad([[-hx, 0, -hz], [-hx, 0, hz], [-hx, H, hz], [-hx, H, -hz]], a, 0.26), quad([[hx, 0, hz], [hx, 0, -hz], [hx, H, -hz], [hx, H, hz]], a, 0.26),
+    quad([[-hx, H, hz], [hx, H, hz], [hx, H, -hz], [-hx, H, -hz]], a, 0.4),
+  ].flat();
+  const corners = [[-hx, -hz], [hx, -hz], [hx, hz], [-hx, hz]];
+  const edges = [];
+  corners.forEach(([x, z], i) => {
+    const [x2, z2] = corners[(i + 1) % 4];
+    edges.push(...v(x, 0, z, [1, 1, 1], 1), ...v(x2, 0, z2, [1, 1, 1], 1), ...v(x, H, z, [1, 1, 1], 1), ...v(x2, H, z2, [1, 1, 1], 1), ...v(x, 0, z, [1, 1, 1], 1), ...v(x, H, z, [1, 1, 1], 1));
+  });
+  const zx = hx + clear, zz = hz + clear, y = 0.004;
+  const zone = clear ? quad([[-zx, y, zz], [zx, y, zz], [zx, y, -zz], [-zx, y, -zz]], a, 0.18) : [];
+  const zoneEdges = clear ? [[-zx, zz], [zx, zz], [zx, -zz], [-zx, -zz]].flatMap(([x, z], i, arr) => [...v(x, y, z, a, 1), ...v(arr[(i + 1) % 4][0], y, arr[(i + 1) % 4][1], a, 1)]) : [];
+  const ring = [];
+  for (let i = 0; i <= 40; i++) { const t = i / 40 * Math.PI * 2, c = Math.cos(t), s = Math.sin(t); ring.push(...v(c * 0.1, 0.002, s * 0.1, [1, 1, 1], 0.95), ...v(c * 0.13, 0.002, s * 0.13, [1, 1, 1], 0.95)); }
+  return { box, edges, zone, zoneEdges, ring };
+}
+
+function arInitGL(gl, geo) {
+  const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; };
+  const prog = gl.createProgram();
+  gl.attachShader(prog, sh(gl.VERTEX_SHADER, "attribute vec3 p;attribute vec4 c;uniform mat4 m;varying vec4 v;void main(){gl_Position=m*vec4(p,1.0);v=c;}"));
+  gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, "precision mediump float;varying vec4 v;void main(){gl_FragColor=v;}"));
+  gl.linkProgram(prog);
+  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+  const bufs = {};
+  for (const [k, data] of Object.entries(geo)) { const b = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, b); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(data), gl.STATIC_DRAW); bufs[k] = { b, n: data.length / 7 }; }
+  return { prog, bufs, loc: { p: gl.getAttribLocation(prog, "p"), c: gl.getAttribLocation(prog, "c"), m: gl.getUniformLocation(prog, "m") } };
+}
+
+// Draws the scene for one view: viewProj = projection × inverse(camera); model = where the box stands
+function arDraw(gl, R, viewProj, model, reticle, ghost) {
+  gl.useProgram(R.prog);
+  gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  gl.enable(gl.DEPTH_TEST);
+  const draw = (k, mode, m) => {
+    const B = R.bufs[k]; if (!B || !B.n) return;
+    gl.bindBuffer(gl.ARRAY_BUFFER, B.b);
+    gl.enableVertexAttribArray(R.loc.p); gl.vertexAttribPointer(R.loc.p, 3, gl.FLOAT, false, 28, 0);
+    gl.enableVertexAttribArray(R.loc.c); gl.vertexAttribPointer(R.loc.c, 4, gl.FLOAT, false, 28, 12);
+    gl.uniformMatrix4fv(R.loc.m, false, m4.mul(viewProj, m));
+    gl.drawArrays(mode, 0, B.n);
+  };
+  if (reticle) { gl.depthMask(false); draw("ring", gl.TRIANGLE_STRIP, reticle); }
+  if (model) {
+    gl.depthMask(false);
+    draw("zone", gl.TRIANGLES, model); draw("zoneEdges", gl.LINES, model);
+    if (!ghost) draw("box", gl.TRIANGLES, model);
+    gl.depthMask(true);
+    draw("edges", gl.LINES, model);
+  }
+  gl.depthMask(true);
+}
+
+async function startAR() {
+  if (!V3 || AR.session) return;
+  const { L, W, H, clear, p } = V3;
+  const ui = document.createElement("div");
+  ui.className = "ar-ui on";
+  ui.innerHTML = `
+    <div class="ar-top"><b>${esc(p.model)}</b><span>${meters(L)} × ${meters(W)} × ${meters(H)}${clear ? ` · zona de uso ${CLEARANCES.find(c => c[0] === clear)[1]}` : ""}</span></div>
+    <div class="ar-msg" id="arMsg">Apunta al suelo y mueve el móvil despacio…</div>
+    <div class="ar-bottom">
+      <button class="ar-btn" id="arRotL" aria-label="Girar a la izquierda">⟲</button>
+      <button class="ar-btn primary" id="arPlace" disabled>Colocar aquí</button>
+      <button class="ar-btn" id="arRotR" aria-label="Girar a la derecha">⟳</button>
+      <button class="ar-btn" id="arExit">Salir</button>
+    </div>`;
+  document.body.append(ui);
+  ui.addEventListener("beforexrselect", e => e.preventDefault());   // taps on the buttons are not XR "select"
+  let session;
+  try {
+    session = await navigator.xr.requestSession("immersive-ar", { requiredFeatures: ["hit-test"], optionalFeatures: ["dom-overlay"], domOverlay: { root: ui } });
+  } catch (e) {
+    ui.remove();
+    toast("No se pudo abrir la cámara: " + (e && e.message || e), 8000);
+    return;
+  }
+  const canvas = document.createElement("canvas");
+  const gl = canvas.getContext("webgl", { xrCompatible: true, alpha: true });
+  Object.assign(AR, { session, gl, ui, hit: null, placed: null, yaw: 0 });
+  Object.assign(AR, arInitGL(gl, arGeometry(L, W, H, clear)));
+  session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
+  AR.ref = await session.requestReferenceSpace("local");
+  AR.hitSource = await session.requestHitTestSource({ space: await session.requestReferenceSpace("viewer") });
+
+  const msg = t => { const el = ui.querySelector("#arMsg"); el.textContent = t; el.hidden = !t; };
+  const placeBtn = ui.querySelector("#arPlace");
+  placeBtn.onclick = () => {
+    if (AR.placed) { AR.placed = null; placeBtn.textContent = "Colocar aquí"; msg("Apunta donde quieras ponerla."); return; }
+    if (!AR.hit) return;
+    AR.placed = { ...AR.hit }; placeBtn.textContent = "Mover"; msg("");
+  };
+  ui.querySelector("#arRotL").onclick = () => { AR.yaw += Math.PI / 12; };
+  ui.querySelector("#arRotR").onclick = () => { AR.yaw -= Math.PI / 12; };
+  ui.querySelector("#arExit").onclick = () => session.end();
+  session.addEventListener("select", () => placeBtn.click());   // without DOM overlay, tapping the screen places/moves
+  session.addEventListener("end", () => { AR.hitSource && AR.hitSource.cancel && AR.hitSource.cancel(); ui.remove(); Object.assign(AR, { session: null, gl: null, hitSource: null }); });
+
+  let faced = false;
+  const frame = (t, xrFrame) => {
+    const s = xrFrame.session;
+    s.requestAnimationFrame(frame);
+    const pose = xrFrame.getViewerPose(AR.ref);
+    if (!pose) return;
+    const hits = xrFrame.getHitTestResults(AR.hitSource);
+    AR.hit = null;
+    for (const h of hits) {   // floor only: the hit pose's up axis must point up
+      const hp = h.getPose(AR.ref); if (!hp) continue;
+      if (hp.transform.matrix[5] > 0.8) { const q = hp.transform.position; AR.hit = { x: q.x, y: q.y, z: q.z }; break; }
+    }
+    if (AR.hit && !faced) {   // first time: turn the long side towards the viewer
+      const v = pose.transform.position; AR.yaw = Math.atan2(v.x - AR.hit.x, v.z - AR.hit.z); faced = true;
+    }
+    placeBtn.disabled = !AR.placed && !AR.hit;
+    if (!AR.placed) msg(AR.hit ? "Toca “Colocar aquí” para dejarla en el suelo." : "Apunta al suelo y mueve el móvil despacio…");
+    const layer = s.renderState.baseLayer;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, layer.framebuffer);
+    gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    const at = AR.placed || AR.hit;
+    const model = at ? m4.place(at.x, at.y, at.z, AR.yaw) : null;
+    const reticle = !AR.placed && AR.hit ? m4.place(AR.hit.x, AR.hit.y, AR.hit.z, 0) : null;
+    for (const view of pose.views) {
+      const vp = layer.getViewport(view);
+      gl.viewport(vp.x, vp.y, vp.width, vp.height);
+      arDraw(gl, AR, m4.mul(view.projectionMatrix, view.transform.inverse.matrix), model, reticle, !AR.placed);
+    }
+  };
+  session.requestAnimationFrame(frame);
+}
+
+async function setupARButton() {
+  const btn = $("arBtn"), hint = $("arHint");
+  if (!btn) return;
+  const ok = await arSupported();
+  if (!$("arBtn")) return;
+  btn.hidden = !ok;
+  hint.hidden = ok;
+}
+
 // ---------- Wiring ----------
 function render() { renderFilters(); renderGrid(); renderCart(); renderPending(); }
 
 document.addEventListener("click", async e => {
-  const t = e.target.closest("[data-toggle],[data-detail],[data-inc],[data-dec],[data-vars],[data-close],[data-edit],[data-vdel],#addVariant,#imgClear,#delMachine,#revertMachine,[data-period],#calcReset,[data-swatch],#ghForget");
+  const t = e.target.closest("[data-toggle],[data-detail],[data-inc],[data-dec],[data-vars],[data-close],[data-edit],[data-vdel],#addVariant,#imgClear,#delMachine,#revertMachine,[data-period],#calcReset,[data-swatch],#ghForget,[data-view3d],[data-back3d],[data-clear],#v3reset,#arBtn");
   if (!t) return;
   const ds = t.dataset;
   if (ds.toggle) { toggleCart(ds.toggle); if (ds.reopen) openDetail(ds.toggle); }
@@ -1538,6 +1935,11 @@ document.addEventListener("click", async e => {
   else if (t.id === "delMachine") deleteMachine();
   else if (t.id === "revertMachine") revertMachine();
   else if (ds.swatch) copySwatch(ds.swatch, ds.swatchName);
+  else if (ds.view3d) open3D(ds.view3d);
+  else if (ds.back3d) { stop3D(); $("modalBox").classList.remove("wide"); openDetail(ds.back3d); }
+  else if (ds.clear !== undefined) setClearance(+ds.clear);
+  else if (t.id === "v3reset") reset3D();
+  else if (t.id === "arBtn") startAR();
   else if (t.id === "ghForget") { if (confirm("¿Quitar la conexión con GitHub en este dispositivo?")) { try { localStorage.removeItem("dmonte-gh"); } catch {} closeModal(); applyEditorMode(); toast("Conexión con GitHub quitada."); } }
   else if (ds.period) { calc.period = ds.period; saveCalc(); renderCalc(); }
   else if (t.id === "calcReset") { calc = { ...CALC_DEFAULTS }; saveCalc(); openCalc(); }
