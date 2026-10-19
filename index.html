@@ -356,12 +356,15 @@
 </header>
 
 <div class="manage-bar">
-  <span class="pending" id="pending"></span>
+    <span class="pending" id="pending"></span>
+  <button class="btn accent small" id="publishBtn" hidden>Publicar cambios</button>
   <button class="btn accent small" id="addBtn">+ Añadir máquina</button>
   <button class="btn primary small" id="saveFolder" title="Escribe data.js en la carpeta Catalogo_Web (Chrome / Edge)">Guardar en carpeta</button>
   <button class="btn small" id="downloadData">Descargar data.js</button>
   <button class="btn small" id="buildWeb" title="Crea la versión con contraseña para publicar en GitHub Pages">Generar web cifrada</button>
   <button class="btn ghost small" id="forgetKey" hidden>Olvidar contraseña en este dispositivo</button>
+  <button class="btn small" id="publishAppBtn" hidden title="Sube a GitHub la versión actual de la app (index.html). Las máquinas y fotos publicadas no cambian.">Publicar app en GitHub</button>
+  <button class="btn ghost small" id="ghSetupBtn" hidden>Conexión con GitHub</button>
   <button class="btn small" id="exportBackup">Exportar copia</button>
   <label class="btn small" style="cursor:pointer" title="El archivo dmonte_backup_….json creado con “Exportar copia”">Importar copia (.json)<input type="file" id="importBackup" accept=".json,application/json" hidden></label>
   <button class="btn ghost small" id="discardAll">Descartar cambios locales</button>
@@ -668,7 +671,7 @@ function openDetail(id) {
         ${vars.map(variantRow).join("")}
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <button class="add ${sel ? "on" : ""}" data-toggle="${esc(id)}" data-reopen="1">${sel ? "✓ Añadida" : "+ Añadir a la selección"}</button>
-          <button class="btn small" data-edit="${esc(id)}">Editar</button>
+          ${canEdit() ? `<button class="btn small" data-edit="${esc(id)}">Editar</button>` : ""}
         </div>
       </div>
     </div>`;
@@ -789,7 +792,7 @@ async function saveDraft() {
   OVERRIDES[newId] = rec;
   await idb.put(newId, rec);
   rebuild(); closeModal(); render();
-  toast(`${p.model} guardada en este navegador. Usa “Guardar en carpeta” para hacerlo permanente.`);
+  toast(`${p.model} guardada en este navegador. ${window.DMONTE_ENC ? "Pulsa “Publicar cambios” para subirla a la web." : window.SINGLE_FILE ? "" : "Usa “Guardar en carpeta” para hacerlo permanente."}`);
 }
 
 async function deleteMachine() {
@@ -834,7 +837,12 @@ function resizeImage(file, max = 900) {
 function pendingCount() { return Object.keys(OVERRIDES).length; }
 function renderPending() {
   const n = pendingCount();
-  if (window.SINGLE_FILE || window.DMONTE_ENC) {
+  if (window.DMONTE_ENC) {
+    $("pending").innerHTML = n ? `<b>${n}</b> cambio${n > 1 ? "s" : ""} sin publicar. Pulsa <b>Publicar cambios</b> para subirlo${n > 1 ? "s" : ""} a la web.` : "Todo está publicado.";
+    $("publishBtn").disabled = !n;
+    return;
+  }
+  if (window.SINGLE_FILE) {
     $("pending").innerHTML = n ? `<b>${n}</b> cambio${n > 1 ? "s" : ""} guardado${n > 1 ? "s" : ""} en este dispositivo. Usa <b>Exportar copia</b> para pasarlos a otro dispositivo.`
                                : "Los cambios que hagas se guardan en este dispositivo.";
     return;
@@ -1128,7 +1136,7 @@ async function openEnvelope(keys, env) {
 function unlock() {
   const E = window.DMONTE_ENC;
   return new Promise(async resolve => {
-    const done = (keys, data) => { WEB.aes = keys.aes; Object.assign(BASE, data); resolve(); };
+    const done = (keys, data) => { WEB.aes = keys.aes; WEB.keys = keys; Object.assign(BASE, data); resolve(); };
     try {   // key remembered on this device
       const saved = JSON.parse(localStorage.getItem("dmonte-key") || "null");
       if (saved && saved.salt === E.salt) { const keys = await keysFromRaw(b64.dec(saved.key)); return done(keys, await openEnvelope(keys, E)); }
@@ -1294,6 +1302,7 @@ function openBuildWeb() {
         <label class="f"><span>Repite la contraseña</span><input type="password" name="pw2" autocomplete="new-password" required></label>
       </div>
       <p style="margin:0;font-size:13px;color:var(--muted)">Se descargará <b>dmonte-web.zip</b>. Descomprímelo en la carpeta de la web (sustituyendo lo que haya) y súbelo a GitHub.</p>
+      <p style="margin:0;font-size:13px;color:var(--warn)">Si ya editas y publicas desde la web, no generes una web nueva: sustituiría los datos publicados. Para subir solo los cambios de la app usa <b>Publicar app en GitHub</b>.</p>
       <div class="specs" id="buildMsg" aria-live="polite"></div>
       <div class="form-foot"><span class="spacer"></span><button type="button" class="btn ghost" data-close>Cancelar</button><button type="submit" class="btn primary" id="buildGo">Generar y descargar</button></div>
     </form>`;
@@ -1306,20 +1315,8 @@ async function runBuildWeb(form) {
   if (pw.length < 8) return msg("La contraseña debe tener al menos 8 caracteres.", true);
   if (pw !== form.elements.pw2.value) return msg("Las contraseñas no coinciden.", true);
   try {
-    // The photos are read from the Catalogo_Web folder (same one used by “Guardar en carpeta”); one permission/picker per click
-    let src = await idb.getMeta("dir");
-    if (src && (await src.queryPermission({ mode: "readwrite" })) !== "granted") {
-      if ((await src.requestPermission({ mode: "readwrite" })) !== "granted") src = null;
-      else return msg("Permiso concedido. Pulsa de nuevo “Generar y descargar”.");
-    }
-    if (!src) {
-      msg("Elige la carpeta Catalogo_Web (la que tiene index.html y data.js).");
-      src = await window.showDirectoryPicker({ id: "dmonte", mode: "readwrite" });
-      try { await src.getFileHandle("data.js"); await src.getFileHandle("index.html"); }
-      catch { return msg("Esa carpeta no es Catalogo_Web (no tiene index.html y data.js).", true); }
-      await idb.setMeta("dir", src);
-      return msg("Carpeta Catalogo_Web guardada. Pulsa de nuevo “Generar y descargar”.");
-    }
+    // The photos are read from the Catalogo_Web folder (same one used by “Guardar en carpeta”)
+    const src = await catalogDir(t => msg(t));
     $("buildGo").disabled = true;
     const t0 = Date.now();
     const r = await buildWebFiles(pw, p => readFrom(src, p), t => msg(t));
@@ -1333,11 +1330,199 @@ async function runBuildWeb(form) {
   } finally { if ($("buildGo")) $("buildGo").disabled = false; }
 }
 
+// ---------- Publishing to GitHub (editor devices only) ----------
+// The editor saves a fine-grained token (Contents: read & write on the site repository) in this browser only.
+// “Publicar cambios” (web) commits the new data.enc.js plus any new photos in one commit through the Git Data API;
+// “Publicar app” (local) replaces index.html only. GitHub Pages redeploys by itself after each commit.
+const GH = {
+  cfg() { try { return JSON.parse(localStorage.getItem("dmonte-gh") || "null"); } catch { return null; } },
+  async api(path, opts = {}, cfg = GH.cfg()) {
+    const headers = { Accept: opts.raw ? "application/vnd.github.raw" : "application/vnd.github+json", Authorization: `Bearer ${cfg.token}`, "X-GitHub-Api-Version": "2022-11-28" };
+    if (opts.body) headers["Content-Type"] = "application/json";
+    const r = await fetch(`https://api.github.com/repos/${encodeURIComponent(cfg.owner)}/${encodeURIComponent(cfg.repo)}${path}`, { method: opts.method || "GET", headers, body: opts.body, cache: "no-store" });
+    if (!r.ok) {
+      let m = ""; try { m = (await r.json()).message; } catch {}
+      const e = new Error(r.status === 401 ? "el token no es válido o ha caducado" : r.status === 403 || r.status === 404 ? "el token no tiene acceso a ese repositorio" : `GitHub respondió ${r.status}${m ? ` (${m})` : ""}`);
+      e.status = r.status; throw e;
+    }
+    return opts.raw ? r.text() : r.status === 204 ? null : r.json();
+  },
+  // files: [{ path, content }] to add or replace, [{ path, content: null }] to delete
+  async commit(files, message, cfg = GH.cfg()) {
+    const ref = await GH.api(`/git/ref/heads/${encodeURIComponent(cfg.branch)}`, {}, cfg);
+    const head = await GH.api(`/git/commits/${ref.object.sha}`, {}, cfg);
+    const tree = [];
+    for (const f of files) {
+      if (f.content === null) { tree.push({ path: f.path, mode: "100644", type: "blob", sha: null }); continue; }
+      const blob = await GH.api("/git/blobs", { method: "POST", body: JSON.stringify({ content: f.content, encoding: "utf-8" }) }, cfg);
+      tree.push({ path: f.path, mode: "100644", type: "blob", sha: blob.sha });
+    }
+    const t = await GH.api("/git/trees", { method: "POST", body: JSON.stringify({ base_tree: head.tree.sha, tree }) }, cfg);
+    const c = await GH.api("/git/commits", { method: "POST", body: JSON.stringify({ message, tree: t.sha, parents: [ref.object.sha] }) }, cfg);
+    await GH.api(`/git/refs/heads/${encodeURIComponent(cfg.branch)}`, { method: "PATCH", body: JSON.stringify({ sha: c.sha }) }, cfg);   // fails if the branch moved meanwhile
+  },
+};
+const canEdit = () => !window.DMONTE_ENC || !!GH.cfg();
+
+function applyEditorMode() {
+  const web = !!window.DMONTE_ENC, editor = !!GH.cfg();
+  $("manageBtn").hidden = web && !editor;
+  if ($("manageBtn").hidden && state.manage) $("manageBtn").click();
+  $("publishBtn").hidden = !(web && editor);
+  $("publishAppBtn").hidden = web || !!window.SINGLE_FILE;
+  $("ghSetupBtn").hidden = !!window.SINGLE_FILE || (web && !editor);
+  renderPending();
+}
+
+function openGhSetup() {
+  const c = GH.cfg() || {}, onPages = location.hostname.endsWith(".github.io");
+  const owner = c.owner || (onPages ? location.hostname.split(".")[0] : ""), repo = c.repo || (onPages ? location.pathname.split("/")[1] : "");
+  $("modalBox").innerHTML = `
+    <form class="form" id="ghForm" autocomplete="off">
+      <div class="form-head"><h3>Conexión con GitHub</h3><button type="button" class="icon-btn" data-close aria-label="Cerrar">×</button></div>
+      <p style="margin:0;font-size:14px;color:var(--muted)">Solo para quien publica. Con la conexión, este dispositivo puede editar y publicar los cambios en la web. El token se guarda únicamente en este navegador.</p>
+      <div class="fgrid" style="grid-template-columns:1fr 1fr">
+        <label class="f"><span>Usuario de GitHub</span><input name="owner" value="${esc(owner)}" required></label>
+        <label class="f"><span>Repositorio</span><input name="repo" value="${esc(repo)}" placeholder="dmonte-catalogo" required></label>
+        <label class="f span2"><span>Token</span><input name="token" type="password" placeholder="${c.token ? "Guardado. Déjalo vacío para mantenerlo" : "github_pat_…"}" ${c.token ? "" : "required"}></label>
+      </div>
+      <details style="font-size:13.5px"><summary style="cursor:pointer;font-weight:600">Cómo crear el token</summary>
+        <ol style="margin:8px 0 0;padding-left:20px;display:grid;gap:4px;color:var(--muted)">
+          <li>En GitHub: tu foto → <b>Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token</b>.</li>
+          <li>Nombre: por ejemplo “D'Monte catálogo”. Caducidad: la que prefieras (máximo un año).</li>
+          <li><b>Repository access → Only select repositories</b> → elige solo el repositorio de la web.</li>
+          <li><b>Permissions → Repository permissions → Contents → Read and write</b>. Nada más.</li>
+          <li><b>Generate token</b>, cópialo y pégalo aquí. GitHub no te lo volverá a enseñar.</li>
+        </ol>
+      </details>
+      <div class="specs" id="ghMsg" aria-live="polite"></div>
+      <div class="form-foot">
+        ${c.token ? '<button type="button" class="btn danger" id="ghForget">Quitar conexión</button>' : ""}
+        <span class="spacer"></span>
+        <button type="button" class="btn ghost" data-close>Cancelar</button>
+        <button type="submit" class="btn primary" id="ghGo">Guardar y comprobar</button>
+      </div>
+    </form>`;
+  $("modal").classList.add("open");
+}
+
+async function saveGhSetup(form) {
+  const msg = (t, bad) => { const el = $("ghMsg"); if (el) { el.textContent = t; el.className = bad ? "err" : "specs"; } };
+  const g = n => form.elements[n].value.trim(), prev = GH.cfg() || {};
+  const cfg = { owner: g("owner"), repo: g("repo"), token: g("token") || prev.token, branch: "" };
+  if (!cfg.owner || !cfg.repo || !cfg.token) return msg("Rellena usuario, repositorio y token.", true);
+  $("ghGo").disabled = true; msg("Comprobando con GitHub…");
+  try {
+    const info = await GH.api("", {}, cfg);
+    if (!info.permissions || !info.permissions.push) return msg("El token no tiene permiso de escritura en ese repositorio (Contents: Read and write).", true);
+    cfg.branch = info.default_branch;
+    try { localStorage.setItem("dmonte-gh", JSON.stringify(cfg)); } catch { return msg("Este navegador no permite guardar la conexión.", true); }
+    closeModal(); applyEditorMode();
+    toast(`Conectado con ${cfg.owner}/${cfg.repo} ✓`);
+  } catch (e) { msg("No se pudo conectar: " + e.message + ".", true); }
+  finally { if ($("ghGo")) $("ghGo").disabled = false; }
+}
+
+// Same encrypted formats as buildWebFiles
+async function photoFile(keys, bytes, mime) {
+  const id = hex(new Uint8Array(await crypto.subtle.sign("HMAC", keys.hmac, bytes)).slice(0, 16));
+  return { id, content: `DMONTE_IMG("${id}","${mime}","${b64.enc(await seal(keys.aes, bytes))}");\n` };
+}
+async function makeEnvelope(keys, salt, obj) {
+  let bytes = new TextEncoder().encode(JSON.stringify(obj));
+  const z = typeof CompressionStream === "function";
+  if (z) bytes = await gzip(bytes);
+  return { v: 1, kdf: "PBKDF2-SHA256", iter: KDF_ITER, salt, z: z ? 1 : 0, data: b64.enc(await seal(keys.aes, bytes)) };
+}
+
+async function publishChanges() {
+  const cfg = GH.cfg();
+  if (!cfg) return openGhSetup();
+  const n = pendingCount();
+  if (!n) return toast("No hay cambios que publicar.");
+  if (!confirm(`¿Publicar ${n} cambio${n > 1 ? "s" : ""} en la web? Todos los que tengan el enlace los verán en unos minutos.`)) return;
+  const btn = $("publishBtn"); btn.disabled = true; btn.textContent = "Publicando…";
+  try {
+    // Someone may have published from another device since this page was opened
+    const remote = await GH.api(`/contents/data.enc.js?ref=${encodeURIComponent(cfg.branch)}`, { raw: true }, cfg);
+    if (JSON.parse(remote.slice(remote.indexOf("{"), remote.lastIndexOf("}") + 1)).data !== window.DMONTE_ENC.data)
+      throw new Error("la web publicada ha cambiado desde que abriste esta página (quizá desde otro dispositivo). Usa “Exportar copia”, recarga la página, importa la copia y vuelve a publicar");
+
+    const keys = WEB.keys, files = [], fresh = {}, used = new Set();
+    const toEnc = async ref => {   // photos added in the editor are data: URLs -> new encrypted files
+      if (isEnc(ref)) { used.add(ref.slice(4)); return ref; }
+      if (!ref || !ref.startsWith("data:")) return "";
+      const mime = ref.slice(5, ref.indexOf(";")), bytes = b64.dec(ref.slice(ref.indexOf(",") + 1));
+      const f = await photoFile(keys, bytes, mime);
+      if (!used.has(f.id)) { files.push({ path: `img/${f.id}.js`, content: f.content }); fresh[f.id] = URL.createObjectURL(new Blob([bytes], { type: mime })); }
+      used.add(f.id);
+      return "enc:" + f.id;
+    };
+    const products = clone(PRODUCTS), stock = {};
+    for (const p of products) p.img = await toEnc(p.img);
+    for (const p of PRODUCTS) if ((STOCK[p.id] || []).length) {
+      stock[p.id] = [];
+      for (const v of clone(STOCK[p.id])) stock[p.id].push({ ...v, img: await toEnc(v.img) });
+    }
+    // Photos no machine uses any more
+    const tree = await GH.api(`/git/trees/${encodeURIComponent(cfg.branch)}?recursive=1`, {}, cfg);
+    for (const t of tree.tree) {
+      const m = /^img\/([0-9a-f]{32})\.js$/.exec(t.path);
+      if (m && !used.has(m[1])) files.push({ path: t.path, content: null });
+    }
+    const env = await makeEnvelope(keys, window.DMONTE_ENC.salt, { generated: new Date().toISOString().slice(0, 10), products, stock });
+    files.push({ path: "data.enc.js", content: "window.DMONTE_ENC = " + JSON.stringify(env) + ";\n" });
+    await GH.commit(files, `Actualizar catálogo (${n} cambio${n > 1 ? "s" : ""})`, cfg);
+
+    Object.assign(WEB.urls, fresh);
+    window.DMONTE_ENC = env;
+    BASE.products = products; BASE.stock = stock;
+    OVERRIDES = {}; await idb.clear(); rebuild(); render();
+    toast("Publicado ✓. Los demás verán los cambios en unos minutos.", 6000);
+  } catch (e) {
+    toast("No se pudo publicar: " + e.message + ".", 10000);
+  } finally { btn.disabled = false; btn.textContent = "Publicar cambios"; }
+}
+
+// Catalogo_Web folder handle (stored when first chosen); asks for permission or the folder when needed
+async function catalogDir(say) {
+  let src = await idb.getMeta("dir");
+  if (src && (await src.queryPermission({ mode: "readwrite" })) !== "granted" && (await src.requestPermission({ mode: "readwrite" })) !== "granted") src = null;
+  if (!src) {
+    say("Elige la carpeta Catalogo_Web (la que tiene index.html y data.js).");
+    src = await window.showDirectoryPicker({ id: "dmonte", mode: "readwrite" });
+    try { await src.getFileHandle("data.js"); await src.getFileHandle("index.html"); }
+    catch { throw new Error("esa carpeta no es Catalogo_Web (no tiene index.html y data.js)"); }
+    await idb.setMeta("dir", src);
+  }
+  return src;
+}
+
+async function publishApp() {
+  const cfg = GH.cfg();
+  if (!cfg) return openGhSetup();
+  if (!window.showDirectoryPicker) return toast("Abre index.html con Chrome o Edge en el ordenador para publicar la app.", 6000);
+  const btn = $("publishAppBtn");
+  try {
+    const src = await catalogDir(t => toast(t, 5000));
+    const html = new TextDecoder().decode(await readFrom(src, "index.html"));
+    const tagIn = '<script src="data.js"><\/script>', tagOut = '<script src="data.enc.js"><\/script>';
+    if (!html.includes(tagIn)) throw new Error("index.html no tiene el formato esperado");
+    if (!confirm(`¿Publicar esta versión de la app en ${cfg.owner}/${cfg.repo}? Solo se sustituye index.html; las máquinas, el stock y las fotos publicadas no cambian.`)) return;
+    btn.disabled = true; btn.textContent = "Publicando…";
+    await GH.commit([{ path: "index.html", content: html.replace(tagIn, tagOut) }], "Actualizar app", cfg);
+    toast("App publicada ✓. La web se actualizará en unos minutos.", 6000);
+  } catch (e) {
+    if (e && e.name === "AbortError") return;
+    toast("No se pudo publicar la app: " + e.message + ".", 10000);
+  } finally { btn.disabled = false; btn.textContent = "Publicar app en GitHub"; }
+}
+
 // ---------- Wiring ----------
 function render() { renderFilters(); renderGrid(); renderCart(); renderPending(); }
 
 document.addEventListener("click", async e => {
-  const t = e.target.closest("[data-toggle],[data-detail],[data-inc],[data-dec],[data-vars],[data-close],[data-edit],[data-vdel],#addVariant,#imgClear,#delMachine,#revertMachine,[data-period],#calcReset,[data-swatch]");
+  const t = e.target.closest("[data-toggle],[data-detail],[data-inc],[data-dec],[data-vars],[data-close],[data-edit],[data-vdel],#addVariant,#imgClear,#delMachine,#revertMachine,[data-period],#calcReset,[data-swatch],#ghForget");
   if (!t) return;
   const ds = t.dataset;
   if (ds.toggle) { toggleCart(ds.toggle); if (ds.reopen) openDetail(ds.toggle); }
@@ -1352,6 +1537,7 @@ document.addEventListener("click", async e => {
   else if (t.id === "delMachine") deleteMachine();
   else if (t.id === "revertMachine") revertMachine();
   else if (ds.swatch) copySwatch(ds.swatch, ds.swatchName);
+  else if (t.id === "ghForget") { if (confirm("¿Quitar la conexión con GitHub en este dispositivo?")) { try { localStorage.removeItem("dmonte-gh"); } catch {} closeModal(); applyEditorMode(); toast("Conexión con GitHub quitada."); } }
   else if (ds.period) { calc.period = ds.period; saveCalc(); renderCalc(); }
   else if (t.id === "calcReset") { calc = { ...CALC_DEFAULTS }; saveCalc(); openCalc(); }
   else if ("close" in ds) closeModal();
@@ -1375,7 +1561,7 @@ document.addEventListener("input", e => {
     $("vTotal").textContent = [...document.querySelectorAll('[data-k="qty"]')].reduce((s, i) => s + (parseInt(i.value, 10) || 0), 0);
   }
 });
-document.addEventListener("submit", e => { if (e.target.id === "editForm") { e.preventDefault(); saveDraft(); } else if (e.target.id === "calcForm") e.preventDefault(); else if (e.target.id === "buildForm") { e.preventDefault(); runBuildWeb(e.target); } });
+document.addEventListener("submit", e => { if (e.target.id === "editForm") { e.preventDefault(); saveDraft(); } else if (e.target.id === "calcForm") e.preventDefault(); else if (e.target.id === "buildForm") { e.preventDefault(); runBuildWeb(e.target); } else if (e.target.id === "ghForm") { e.preventDefault(); saveGhSetup(e.target); } });
 $("modal").addEventListener("mousedown", e => { if (e.target.id === "modal" && !$("editForm") && !$("buildForm")) closeModal(); });
 document.addEventListener("keydown", e => { if (e.key === "Escape") { if (!$("editForm") || confirm("¿Cerrar sin guardar?")) closeModal(); openDrawer(false); } });
 $("search").addEventListener("input", e => { state.q = e.target.value.trim(); state.shown = PAGE; renderFilters(); renderGrid(); });
@@ -1401,6 +1587,10 @@ $("themeBtn").onclick = () => {
 };
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", renderThemeBtn);
 $("buildWeb").onclick = openBuildWeb;
+$("publishBtn").onclick = publishChanges;
+$("publishAppBtn").onclick = publishApp;
+$("ghSetupBtn").onclick = openGhSetup;
+addEventListener("hashchange", () => { if (location.hash === "#editor" && !window.SINGLE_FILE) openGhSetup(); });
 $("forgetKey").onclick = () => { try { localStorage.removeItem("dmonte-key"); } catch {} toast("Este dispositivo ya no recuerda la contraseña."); };
 $("addBtn").onclick = () => openEditor(null);
 $("saveFolder").onclick = saveToFolder;
@@ -1425,6 +1615,7 @@ $("discardAll").onclick = async () => {
   if (window.DMONTE_ENC) await unlock();
   if (window.SINGLE_FILE || window.DMONTE_ENC) { $("saveFolder").hidden = true; $("downloadData").hidden = true; $("buildWeb").hidden = true; }
   if (window.DMONTE_ENC) $("forgetKey").hidden = false;
+  applyEditorMode();
   await idb.open();
   OVERRIDES = await idb.all();
   rebuild(); render();
@@ -1432,6 +1623,7 @@ $("discardAll").onclick = async () => {
     $("grid").innerHTML = '<div class="empty">No se pudo cargar data.js. Mantén juntos index.html, data.js y la carpeta img, y abre index.html desde esa carpeta en tu ordenador (no desde drive.google.com).</div>';
     $("saveFolder").disabled = $("downloadData").disabled = true;
   }
+  if (location.hash === "#editor" && !window.SINGLE_FILE) openGhSetup();
 })();
 </script>
 </body>
