@@ -173,7 +173,7 @@
   .modal-box { background: var(--surface); border-radius: 18px; width: min(900px, 100%); max-height: 92vh; overflow: auto; box-shadow: var(--shadow-lg); border: 1px solid var(--line); }
   .modal-box.wide { width: min(1040px, 100%); }
   .detail { display: grid; grid-template-columns: 1.1fr 1fr; }
-  .detail .big { background: var(--img-bg); display: flex; align-items: center; justify-content: center; padding: 24px; min-height: 280px; }
+  .detail .big { background: var(--img-bg); display: flex; flex-direction: column; gap: 14px; align-items: center; justify-content: center; padding: 24px; min-height: 280px; }
   .detail .big img { max-width: 100%; max-height: 60vh; object-fit: contain; }
   .detail .info { padding: 24px; display: flex; flex-direction: column; gap: 10px; position: relative; }
   .detail .info > .icon-btn { position: absolute; top: 12px; right: 12px; }
@@ -314,6 +314,39 @@
   .slide-actions .icon-btn { font-size: 16px; padding: 2px 8px; }
   .icon-btn:disabled { opacity: .3; cursor: default; }
 
+  .vbox { width: 100%; aspect-ratio: 16 / 9; max-height: 60vh; border-radius: 12px; overflow: hidden; background: #0b0b0d; display: grid; place-items: center; }
+  .vbox video { width: 100%; height: 100%; object-fit: contain; background: #000; display: block; }
+  .vwait { width: 70%; display: grid; gap: 10px; justify-items: center; color: #c9c9cf; font-size: 13px; text-align: center; }
+  .vbar { width: 100%; height: 4px; border-radius: 999px; background: rgba(255, 255, 255, .15); overflow: hidden; }
+  .vbar span { display: block; width: 0; height: 100%; background: #3d63e6; transition: width .2s; }
+
+  .media { position: relative; width: 100%; }
+  .mtrack { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; scroll-behavior: smooth; scrollbar-width: none; overscroll-behavior-x: contain; }
+  .mtrack::-webkit-scrollbar { display: none; }
+  .mslide { flex: 0 0 100%; scroll-snap-align: center; display: grid; place-items: center; min-height: 280px; }
+  .mslide img { max-width: 100%; max-height: 60vh; object-fit: contain; }
+  .mnav { position: absolute; top: calc(50% - 24px); width: 42px; height: 42px; padding: 0; border: 1px solid rgba(0, 0, 0, .06); border-radius: 50%; background: rgba(255, 255, 255, .92); color: #18181b; display: grid; place-items: center; box-shadow: 0 4px 14px rgba(17, 17, 20, .16); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); transition: opacity .2s, transform .15s, box-shadow .15s; }
+  .mnav svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+  .mnav:hover { transform: scale(1.07); box-shadow: 0 6px 18px rgba(17, 17, 20, .22); }
+  .mnav:active { transform: scale(.96); }
+  .mnav.prev { left: 6px; } .mnav.next { right: 6px; }
+  .mnav:disabled { opacity: 0; pointer-events: none; }
+  .mdots { display: flex; justify-content: center; gap: 6px; margin-top: 12px; }
+  .mdots button { border: 1px solid var(--line); background: var(--surface); color: var(--muted); border-radius: 999px; padding: 4px 14px; font-size: 12.5px; font-weight: 500; }
+  .mdots button[aria-current="true"] { background: var(--ink); border-color: var(--ink); color: var(--surface); }
+
+  .vfield { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .vfield select { flex: 1 1 220px; }
+  .vimport { display: grid; gap: 10px; max-height: 52vh; overflow: auto; }
+  .vrow { display: grid; grid-template-columns: minmax(150px, 1fr) 2fr; gap: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
+  .vrow b { display: block; font-size: 14px; }
+  .vrow span { font-size: 12px; color: var(--muted); }
+  .vmach { display: grid; gap: 4px; font-size: 13px; }
+  .vmach label { display: flex; gap: 6px; align-items: baseline; }
+  .vmach small { color: var(--muted); }
+  .vmach input { accent-color: var(--accent); }
+  @media (max-width: 760px) { .vrow { grid-template-columns: 1fr; } }
+
   .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--surface); padding: 10px 18px; border-radius: 999px; z-index: 40; display: none; max-width: 90vw; font-size: 14px; box-shadow: var(--shadow-lg); }
   .toast.show { display: block; }
 
@@ -419,6 +452,7 @@
   <button class="btn small" id="downloadData">Descargar data.js</button>
   <button class="btn small" id="buildWeb" title="Crea la versión con contraseña para publicar en GitHub Pages">Generar web cifrada</button>
   <button class="btn ghost small" id="forgetKey" hidden>Olvidar contraseña en este dispositivo</button>
+  <button class="btn small" id="videoImportBtn" hidden>Añadir vídeos</button>
   <button class="btn small" id="publishAppBtn" hidden title="Sube a GitHub la versión actual de la app (index.html). Las máquinas y fotos publicadas no cambian.">Publicar app en GitHub</button>
   <button class="btn ghost small" id="ghSetupBtn" hidden>Conexión con GitHub</button>
   <button class="btn small" id="exportBackup">Exportar copia</button>
@@ -552,10 +586,11 @@ const idb = {
   clear() { return this.tx("overrides", "readwrite", s => s.clear()); },
   getMeta(k) { return this.tx("meta", "readonly", s => s.get(k)); },
   setMeta(k, v) { return this.tx("meta", "readwrite", s => s.put(v, k)); },
+  delMeta(k) { return this.tx("meta", "readwrite", s => s.delete(k)); },
 };
 
 // ---------- State ----------
-let PRODUCTS = [], STOCK = {}, byId = {}, OVERRIDES = {}, SCREEN = null;
+let PRODUCTS = [], STOCK = {}, byId = {}, OVERRIDES = {}, SCREEN = null, VIDEOS = {};
 // Training disciplines: an explicit p.disciplines (set in the editor) wins; otherwise these name rules apply
 const DISCIPLINES = ["Hyrox", "Crossfit"];
 const DISC_RULES = {
@@ -580,6 +615,7 @@ function rebuild() {
   STOCK = stock;
   byId = Object.fromEntries(PRODUCTS.map(p => [p.id, p]));
   SCREEN = OVERRIDES.__screen__ ? OVERRIDES.__screen__.screen : (BASE.screen || null);
+  VIDEOS = { ...(BASE.videos || {}), ...((OVERRIDES.__videos__ || {}).videos || {}) };
   const key = JSON.stringify(SCREEN);
   if (VM.screenKey !== key) { VM.screenKey = key; VM.slides = null; if (VM.on) vmSetSlides(); }
 }
@@ -746,7 +782,7 @@ function openDetail(id) {
   const p = byId[id], vars = STOCK[id] || [], sel = id in state.cart, d = p.dims || {};
   $("modalBox").innerHTML = `
     <div class="detail">
-      <div class="big">${picHtml(p)}</div>
+      <div class="big">${mediaHtml(p)}</div>
       <div class="info">
         <button class="icon-btn" data-close aria-label="Cerrar">×</button>
         <h3>${esc(p.model)}</h3>
@@ -772,8 +808,10 @@ function openDetail(id) {
       </div>
     </div>`;
   $("modal").classList.add("open");
+  bindMedia();
+  startVideo();
 }
-function closeModal() { stop3D(); $("modal").classList.remove("open"); $("modalBox").classList.remove("wide"); }
+function closeModal() { if (VID.loading) VID.loading.abort(); stop3D(); $("modal").classList.remove("open"); $("modalBox").classList.remove("wide"); }
 
 // ---------- Editor ----------
 let draft = null;   // { id, isNew, product, stock }
@@ -828,6 +866,7 @@ function renderEditor(err = "") {
           <input name="funcExtra" placeholder="Otra función (opcional, separadas por comas)">
         </div>
         <label class="f span4"><span>Características (una por línea)</span><textarea name="features">${esc((p.features || []).join("\n"))}</textarea></label>
+        ${window.DMONTE_ENC ? `<div class="f span4"><span>Vídeo</span><div class="vfield"><select name="video">${videoOptions(p.video)}</select><label class="btn small" style="cursor:pointer">Subir vídeo nuevo…<input type="file" id="videoFile" accept="video/mp4,video/*" hidden></label></div></div>` : ""}
       </div>
       <datalist id="groupList">${groups.map(g => `<option value="${esc(tr(g))}">`).join("")}</datalist>
       <datalist id="sectionList">${sections.map(s => `<option value="${esc(tr(s))}">`).join("")}</datalist>
@@ -872,6 +911,7 @@ function readForm() {
   p.features = f.elements.features.value.split("\n").map(s => s.trim()).filter(Boolean);
   const disc = [...f.querySelectorAll('input[name="disc"]:checked')].map(i => i.value);   // only stored when it differs from the name rules
   if (disc.join() === autoDisciplines(p).join()) delete p.disciplines; else p.disciplines = disc;
+  if (f.elements.video) { if (f.elements.video.value) p.video = f.elements.video.value; else delete p.video; }
   f.querySelectorAll("[data-v]").forEach(i => {
     const v = draft.stock[i.dataset.v];
     v[i.dataset.k] = i.dataset.k === "qty" ? Math.max(0, parseInt(i.value, 10) || 0) : i.value.trim();
@@ -1440,11 +1480,13 @@ const GH = {
     return opts.raw ? r.text() : r.status === 204 ? null : r.json();
   },
   // files: [{ path, content }] to add or replace, [{ path, content: null }] to delete
-  async commit(files, message, cfg = GH.cfg()) {
+  async commit(files, message, cfg = GH.cfg(), progress) {
     const ref = await GH.api(`/git/ref/heads/${encodeURIComponent(cfg.branch)}`, {}, cfg);
     const head = await GH.api(`/git/commits/${ref.object.sha}`, {}, cfg);
     const tree = [];
+    let done = 0;
     for (const f of files) {
+      if (progress) progress(++done, files.length);
       if (f.content === null) { tree.push({ path: f.path, mode: "100644", type: "blob", sha: null }); continue; }
       const blob = await GH.api("/git/blobs", { method: "POST", body: JSON.stringify({ content: f.content, encoding: "utf-8" }) }, cfg);
       tree.push({ path: f.path, mode: "100644", type: "blob", sha: blob.sha });
@@ -1463,6 +1505,7 @@ function applyEditorMode() {
   $("publishBtn").hidden = !(web && editor);
   $("vmEdit").hidden = !canEdit();
   $("publishAppBtn").hidden = web || !!window.SINGLE_FILE;
+  $("videoImportBtn").hidden = !(web && editor);
   $("ghSetupBtn").hidden = !!window.SINGLE_FILE || (web && !editor);
   renderPending();
 }
@@ -1533,7 +1576,8 @@ async function publishChanges() {
   if (!cfg) return openGhSetup();
   const n = pendingCount();
   if (!n) return toast("No hay cambios que publicar.");
-  if (!confirm(`¿Publicar ${n} cambio${n > 1 ? "s" : ""} en la web? Todos los que tengan el enlace los verán en unos minutos.`)) return;
+  const pend = Object.entries(VIDEOS).filter(([, v]) => v.pending), pendMB = pend.reduce((s, [, v]) => s + (v.bytes || 0), 0);
+  if (!confirm(`¿Publicar ${n} cambio${n > 1 ? "s" : ""} en la web?${pend.length ? ` Se subirán ${pend.length} vídeo${pend.length > 1 ? "s" : ""} (${mbText(pendMB)}), puede tardar unos minutos.` : ""} Todos los que tengan el enlace los verán en unos minutos.`)) return;
   const btn = $("publishBtn"); btn.disabled = true; btn.textContent = "Publicando…";
   try {
     // Someone may have published from another device since this page was opened
@@ -1559,19 +1603,31 @@ async function publishChanges() {
     }
     const screen = SCREEN ? [] : null;   // screen slides: new images get encrypted like machine photos
     for (const s of SCREEN || []) screen.push(s.img ? { ...s, img: await toEnc(s.img) } : s);
+    // Videos added on this device: encrypt and upload them; already published ones stay as they are
+    const videos = clone(BASE.videos || {});
+    let k = 0;
+    for (const [id, v] of pend) {
+      btn.textContent = `Cifrando vídeos ${++k}/${pend.length}…`;
+      const blob = await idb.getMeta(vidKey(id));
+      if (!blob) continue;
+      const content = `DMONTE_VID("${id}","${blob.type || "video/mp4"}","${b64.enc(await seal(keys.aes, new Uint8Array(await blob.arrayBuffer())))}");\n`;
+      files.push({ path: `vid/${id}.js`, content });
+      videos[id] = { name: v.name, size: content.length };
+    }
     // Photos no machine uses any more
     const tree = await GH.api(`/git/trees/${encodeURIComponent(cfg.branch)}?recursive=1`, {}, cfg);
     for (const t of tree.tree) {
       const m = /^img\/([0-9a-f]{32})\.js$/.exec(t.path);
       if (m && !used.has(m[1])) files.push({ path: t.path, content: null });
     }
-    const env = await makeEnvelope(keys, window.DMONTE_ENC.salt, { generated: new Date().toISOString().slice(0, 10), products, stock, ...(screen ? { screen } : {}) });
+    const env = await makeEnvelope(keys, window.DMONTE_ENC.salt, { generated: new Date().toISOString().slice(0, 10), products, stock, ...(screen ? { screen } : {}), ...(Object.keys(videos).length ? { videos } : {}) });
     files.push({ path: "data.enc.js", content: "window.DMONTE_ENC = " + JSON.stringify(env) + ";\n" });
-    await GH.commit(files, `Actualizar catálogo (${n} cambio${n > 1 ? "s" : ""})`, cfg);
+    await GH.commit(files, `Actualizar catálogo (${n} cambio${n > 1 ? "s" : ""})`, cfg, (i, all) => { btn.textContent = `Subiendo ${i}/${all}…`; });
 
     Object.assign(WEB.urls, fresh);
     window.DMONTE_ENC = env;
-    BASE.products = products; BASE.stock = stock; BASE.screen = screen || undefined;
+    BASE.products = products; BASE.stock = stock; BASE.screen = screen || undefined; BASE.videos = videos;
+    for (const [id] of pend) await idb.delMeta(vidKey(id));
     OVERRIDES = {}; await idb.clear(); rebuild(); render();
     toast("Publicado ✓. Los demás verán los cambios en unos minutos.", 6000);
   } catch (e) {
@@ -2315,11 +2371,196 @@ function setTab(tab, push) {
   if (nutri) { mountNutri(); vmStart(); } else vmStop();
 }
 
+// ---------- Machine videos ----------
+// p.video is "enc:<id>" (encrypted vid/<id>.js in the published copy) or a plain path / URL (local copy).
+// An encrypted video starts downloading as soon as the machine's card opens, with a progress bar, and is
+// decrypted in memory only (nothing is saved on the device); the last few stay ready for the session.
+const VID = { urls: new Map(), loading: null };
+
+function videoBox(p) {
+  if (!p.video) return "";
+  return `<div class="vbox" id="vbox" data-video="${esc(p.video)}"><div class="vwait"><div class="vbar"><span id="vbar"></span></div><span id="vmsg">Cargando vídeo…</span></div></div>`;
+}
+function showVideo(url) {
+  const box = $("vbox");
+  if (!box) return;
+  box.innerHTML = `<video src="${esc(url)}" controls playsinline preload="auto" controlslist="nodownload" disablepictureinpicture oncontextmenu="return false"></video>`;
+  box.querySelector("video").addEventListener("loadedmetadata", e => {   // fit the box to the video's shape (many are vertical)
+    const { videoWidth: w, videoHeight: h } = e.target;
+    if (w && h) { box.style.aspectRatio = `${w} / ${h}`; box.style.width = `min(100%, calc(60vh * ${(w / h).toFixed(4)}))`; }
+  });
+}
+// Encrypted file: DMONTE_VID("<id>","<mime>","<base64 of iv + ciphertext>");
+async function fetchVideo(id, size, signal, progress) {
+  if (location.protocol === "file:") {   // downloaded copy: the browser cannot fetch from disk, load it as a script
+    return new Promise((res, rej) => {
+      const s = document.createElement("script");
+      window.DMONTE_VID = (vid, mime, data) => { if (vid === id) res({ mime, data }); };
+      s.onerror = () => rej(new Error("no encontrado")); s.onload = () => s.remove();
+      s.src = `vid/${id}.js`; document.head.append(s);
+    });
+  }
+  const r = await fetch(`vid/${id}.js`, { signal });
+  if (!r.ok) throw new Error("no encontrado");
+  const total = size || +r.headers.get("Content-Length") || 0, reader = r.body.getReader(), parts = [];
+  let got = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    parts.push(value); got += value.length;
+    if (total) progress(Math.min(0.99, got / total));
+  }
+  const q = (await new Blob(parts).text()).split('"');
+  return { mime: q[3], data: q[5] };
+}
+async function startVideo(force) {
+  const box = $("vbox");
+  if (!box) return;
+  const ref = box.dataset.video;
+  if (!isEnc(ref)) return showVideo(ref);
+  const id = ref.slice(4);
+  if (VID.urls.has(id)) return showVideo(VID.urls.get(id));
+  if ((VIDEOS[id] || {}).pending) {   // added on this device and not published yet: play the local file
+    const blob = await idb.getMeta(vidKey(id));
+    if (blob) { const url = URL.createObjectURL(blob); VID.urls.set(id, url); return showVideo(url); }
+  }
+  if (!force && navigator.connection && navigator.connection.saveData) {
+    $("vmsg").innerHTML = 'Ahorro de datos activado. <button type="button" class="btn small" data-vgo>▶ Cargar vídeo</button>';
+    return;
+  }
+  if (VID.loading) VID.loading.abort();
+  const ctl = VID.loading = new AbortController();
+  const show = f => { const b = $("vbar"), m = $("vmsg"); if (b) b.style.width = Math.round(f * 100) + "%"; if (m) m.textContent = `Cargando vídeo… ${Math.round(f * 100)} %`; };
+  try {
+    const v = await fetchVideo(id, (VIDEOS[id] || {}).size, ctl.signal, show);
+    show(1);
+    const url = URL.createObjectURL(new Blob([await unseal(WEB.aes, b64.dec(v.data))], { type: v.mime }));
+    VID.urls.set(id, url);
+    if (VID.urls.size > 3) { const [k, u] = VID.urls.entries().next().value; URL.revokeObjectURL(u); VID.urls.delete(k); }
+    if ($("vbox") && $("vbox").dataset.video === ref) showVideo(url);
+  } catch (e) {
+    if (e.name !== "AbortError" && $("vmsg")) $("vmsg").textContent = "No se pudo cargar el vídeo.";
+  } finally { if (VID.loading === ctl) VID.loading = null; }
+}
+
+// Photo / video carousel in the machine's card (swipe, arrows or the Foto / Vídeo buttons)
+function mediaHtml(p) {
+  if (!p.video) return picHtml(p);
+  return `<div class="media">
+      <div class="mtrack" id="mtrack"><div class="mslide">${picHtml(p)}</div><div class="mslide">${videoBox(p)}</div></div>
+      <button type="button" class="mnav prev" data-mnav="-1" aria-label="Anterior" disabled><svg viewBox="0 0 24 24"><path d="m14.5 5.5-6.5 6.5 6.5 6.5"/></svg></button>
+      <button type="button" class="mnav next" data-mnav="1" aria-label="Siguiente"><svg viewBox="0 0 24 24"><path d="m9.5 5.5 6.5 6.5-6.5 6.5"/></svg></button>
+      <div class="mdots"><button type="button" data-mgo="0" aria-current="true">Foto</button><button type="button" data-mgo="1" aria-current="false">▶ Vídeo</button></div>
+    </div>`;
+}
+function mediaSync(i) {
+  const t = $("mtrack");
+  if (!t) return;
+  document.querySelectorAll("[data-mgo]").forEach(b => b.setAttribute("aria-current", +b.dataset.mgo === i));
+  document.querySelector(".mnav.prev").disabled = i <= 0;
+  document.querySelector(".mnav.next").disabled = i >= t.children.length - 1;
+  const v = t.querySelector("video");
+  if (v && i !== 1 && !v.paused) v.pause();   // leaving the video slide pauses it
+}
+function mediaGo(i) {
+  const t = $("mtrack");
+  if (!t) return;
+  i = clamp(i, 0, t.children.length - 1);
+  t.scrollTo({ left: i * t.clientWidth });
+  mediaSync(i);
+}
+const mediaIndex = () => { const t = $("mtrack"); return t ? Math.round(t.scrollLeft / t.clientWidth) : 0; };
+function bindMedia() {
+  const t = $("mtrack");
+  if (t) t.addEventListener("scroll", () => mediaSync(mediaIndex()), { passive: true });   // swiping
+}
+// ---------- Video library ----------
+// BASE.videos = { <id>: { name, size } }, each published as vid/<id>.js; a machine points to one with p.video = "enc:<id>",
+// so one video can serve several machines. Videos added on this device wait in IndexedDB ("vid:<id>") as pending
+// entries of the "__videos__" override until "Publicar cambios" encrypts and uploads them.
+const vidKey = id => "vid:" + id;
+const VIDEO_FAMILIES = { "LDEP-01": ["LDEP-02", "LDEP-03", "LDEP-04"], "LDM-05A": ["LDM-05B", "LDM-09", "LDM-10"], "LDLN-024": ["LDLN-029"] };
+const mbText = b => (b / 1048576).toLocaleString("es-ES", { maximumFractionDigits: 1 }) + " MB";
+
+async function addVideoFiles(files) {
+  const pend = { ...((OVERRIDES.__videos__ || {}).videos || {}) }, out = [];
+  for (const file of files) {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const id = hex(new Uint8Array(await crypto.subtle.sign("HMAC", WEB.keys.hmac, bytes)).slice(0, 16));
+    if (!VIDEOS[id] && !pend[id]) {
+      await idb.setMeta(vidKey(id), new Blob([bytes], { type: file.type || "video/mp4" }));
+      pend[id] = { name: file.name, bytes: bytes.length, pending: true };
+    }
+    out.push({ id, name: file.name, bytes: bytes.length });
+  }
+  OVERRIDES.__videos__ = { videos: pend, updated: new Date().toISOString() };
+  await idb.put("__videos__", OVERRIDES.__videos__);
+  rebuild();
+  return out;
+}
+function videoOptions(cur) {
+  const list = Object.entries(VIDEOS).sort((a, b) => a[1].name.localeCompare(b[1].name, "es", { numeric: true }));
+  return '<option value="">Sin vídeo</option>' + list.map(([id, v]) => `<option value="enc:${id}" ${cur === "enc:" + id ? "selected" : ""}>${esc(v.name)}${v.pending ? " (sin publicar)" : ""}</option>`).join("");
+}
+// File name -> machines: the same model, its variants (LDT-997 -> LDT-997-1.6, LD-9087 -> LD-9087T) and its family
+function videoTargets(name) {
+  const base = normId(name.replace(/\.[^.]+$/, ""));
+  const ids = PRODUCTS.filter(p => p.id === base || (p.id.startsWith(base) && !/^[0-9]/.test(p.id.slice(base.length)))).map(p => p.id);
+  for (const id of VIDEO_FAMILIES[base] || []) if (byId[id] && !ids.includes(id)) ids.push(id);
+  return ids;
+}
+
+let videoImport = null;
+function openVideoImport() {
+  videoImport = null;
+  $("modalBox").innerHTML = `
+    <form class="form" id="videoImportForm" onsubmit="return false">
+      <div class="form-head"><h3>Añadir vídeos</h3><button type="button" class="icon-btn" data-close aria-label="Cerrar">×</button></div>
+      <p style="margin:0;font-size:14px;color:var(--muted)">Elige los vídeos (MP4). Cada uno se asigna a la máquina cuyo modelo coincide con el nombre del archivo, a sus variantes y a su familia. Revisa la lista, pulsa “Asignar vídeos” y después “Publicar cambios”.</p>
+      <label class="btn" style="cursor:pointer;justify-self:start">Elegir vídeos…<input type="file" id="videoImportFile" accept="video/mp4,video/*" multiple hidden></label>
+      <div id="videoImportList"></div>
+      <div class="form-foot"><span class="spacer"></span><button type="button" class="btn ghost" data-close>Cancelar</button><button type="button" class="btn primary" id="videoImportApply" disabled>Asignar vídeos</button></div>
+    </form>`;
+  $("modal").classList.add("open");
+}
+async function prepareVideoImport(files) {
+  $("videoImportList").innerHTML = '<div class="specs">Preparando vídeos…</div>';
+  const added = await addVideoFiles(files);
+  const baseOf = v => normId(v.name.replace(/\.[^.]+$/, ""));
+  const pick = {};   // each machine takes the closest file name: its exact model first, then the longest prefix
+  added.forEach(v => videoTargets(v.name).forEach(pid => {
+    const score = pid === baseOf(v) ? 1000 : baseOf(v).length;
+    if (!pick[pid] || score > pick[pid].score) pick[pid] = { name: v.name, score };
+  }));
+  videoImport = added.map(v => ({ ...v, machines: Object.keys(pick).filter(pid => pick[pid].name === v.name) }));
+  const seen = {};
+  $("videoImportList").innerHTML = `<div class="vimport">${videoImport.map((v, i) => {
+    const dup = seen[v.id]; seen[v.id] = seen[v.id] || v.name;
+    return `<div class="vrow"><div><b>${esc(v.name)}</b><span>${mbText(v.bytes)}${dup ? ` · mismo vídeo que ${esc(dup)}` : ""}</span></div>
+      <div class="vmach">${v.machines.length ? v.machines.map(pid => `<label><input type="checkbox" data-vimp="${i}" value="${esc(pid)}" checked>${esc(byId[pid].model)} <small>${esc(byId[pid].name)}${byId[pid].video && byId[pid].video !== "enc:" + v.id ? " · sustituye su vídeo" : ""}</small></label>`).join("")
+        : '<span class="specs">Ninguna máquina coincide: queda en la videoteca para asignarlo desde el editor.</span>'}</div></div>`;
+  }).join("")}</div>`;
+  $("videoImportApply").disabled = false;
+}
+async function applyVideoImport() {
+  if (!videoImport) return;
+  let n = 0;
+  for (const box of document.querySelectorAll("[data-vimp]:checked")) {
+    const v = videoImport[+box.dataset.vimp], pid = box.value, p = byId[pid];
+    if (!p) continue;
+    const rec = { product: { ...clone(p), video: "enc:" + v.id }, stock: clone(STOCK[pid] || []), updated: new Date().toISOString() };
+    OVERRIDES[pid] = rec; await idb.put(pid, rec); n++;
+  }
+  rebuild(); closeModal(); render();
+  const vids = new Set(videoImport.map(v => v.id)).size;
+  toast(`${vids} vídeo${vids === 1 ? "" : "s"} preparado${vids === 1 ? "" : "s"} para ${n} máquina${n === 1 ? "" : "s"}. Pulsa “Publicar cambios” para subirlos.`, 8000);
+}
+
 // ---------- Wiring ----------
 function render() { renderFilters(); renderGrid(); renderCart(); renderPending(); }
 
 document.addEventListener("click", async e => {
-  const t = e.target.closest("[data-toggle],[data-detail],[data-inc],[data-dec],[data-vars],[data-close],[data-edit],[data-vdel],#addVariant,#imgClear,#delMachine,#revertMachine,[data-period],#calcReset,[data-swatch],#ghForget,[data-view3d],[data-back3d],[data-clear],#v3reset,#arBtn,[data-tab],[data-slide-up],[data-slide-down],[data-slide-del],#slidesDefault,#slidesSave");
+  const t = e.target.closest("[data-toggle],[data-detail],[data-inc],[data-dec],[data-vars],[data-close],[data-edit],[data-vdel],#addVariant,#imgClear,#delMachine,#revertMachine,[data-period],#calcReset,[data-swatch],#ghForget,[data-view3d],[data-back3d],[data-clear],#v3reset,#arBtn,[data-tab],[data-slide-up],[data-slide-down],[data-slide-del],#slidesDefault,#slidesSave,[data-vgo],[data-mnav],[data-mgo],#videoImportApply");
   if (!t) return;
   const ds = t.dataset;
   if (ds.toggle) { toggleCart(ds.toggle); if (ds.reopen) openDetail(ds.toggle); }
@@ -2345,6 +2586,10 @@ document.addEventListener("click", async e => {
   else if (ds.slideDel !== undefined) { screenDraft.splice(+ds.slideDel, 1); renderScreenEditor(); }
   else if (t.id === "slidesDefault") { screenDraft = clone(SCREEN_DEFAULT); renderScreenEditor(); }
   else if (t.id === "slidesSave") saveScreen(false);
+  else if ("vgo" in ds) startVideo(true);
+  else if (ds.mnav) mediaGo(mediaIndex() + +ds.mnav);
+  else if (ds.mgo !== undefined) mediaGo(+ds.mgo);
+  else if (t.id === "videoImportApply") applyVideoImport();
   else if (t.id === "ghForget") { if (confirm("¿Quitar la conexión con GitHub en este dispositivo?")) { try { localStorage.removeItem("dmonte-gh"); } catch {} closeModal(); applyEditorMode(); toast("Conexión con GitHub quitada."); } }
   else if (ds.period) { calc.period = ds.period; saveCalc(); renderCalc(); }
   else if (t.id === "calcReset") { calc = { ...CALC_DEFAULTS }; saveCalc(); mountCalc(); }
@@ -2356,6 +2601,12 @@ document.addEventListener("change", async e => {
   else if (el.id === "slideFile" && el.files.length) {
     for (const file of el.files) { try { screenDraft.push({ img: await resizeImage(file, 1080, "#000") }); } catch { toast("No se pudo leer esa imagen."); } }
     renderScreenEditor();
+  } else if (el.id === "videoFile" && el.files[0]) {
+    readForm();
+    try { const [v] = await addVideoFiles([el.files[0]]); draft.product.video = "enc:" + v.id; } catch { toast("No se pudo leer ese vídeo."); }
+    renderEditor();
+  } else if (el.id === "videoImportFile" && el.files.length) {
+    await prepareVideoImport([...el.files]);
   } else if (el.id === "imgFile" && el.files[0]) {
     readForm();
     try { draft.product.img = await resizeImage(el.files[0]); } catch { toast("No se pudo leer esa imagen."); }
@@ -2391,6 +2642,7 @@ $("manageBtn").onclick = () => {
 $("vmSpin").onclick = () => { VM.spin = !VM.spin; $("vmSpin").setAttribute("aria-pressed", VM.spin); };
 $("vmReset").onclick = () => { VM.az = -0.55; VM.el = 0.2; VM.zoom = 1; };
 $("vmEdit").onclick = openScreenEditor;
+$("videoImportBtn").onclick = openVideoImport;
 addEventListener("hashchange", () => setTab(location.hash === "#nutricion" ? "nutricion" : "catalogo"));
 $("cushionBtn").onclick = openCushions;
 $("themeBtn").onclick = () => {
@@ -2421,6 +2673,7 @@ $("importBackup").onchange = async e => {
 };
 $("discardAll").onclick = async () => {
   if (!pendingCount() || !confirm("¿Descartar todos los cambios que aún no están guardados en data.js?")) return;
+  for (const [id, v] of Object.entries(VIDEOS)) if (v.pending) await idb.delMeta(vidKey(id));
   OVERRIDES = {}; await idb.clear(); rebuild(); render(); toast("Cambios locales descartados.");
 };
 
