@@ -556,7 +556,15 @@ const idb = {
 
 // ---------- State ----------
 let PRODUCTS = [], STOCK = {}, byId = {}, OVERRIDES = {}, SCREEN = null;
-const state = { group: null, func: null, q: "", onlyStock: false, cart: loadCart(), open: new Set(), shown: PAGE, manage: false };
+// Training disciplines: an explicit p.disciplines (set in the editor) wins; otherwise these name rules apply
+const DISCIPLINES = ["Hyrox", "Crossfit"];
+const DISC_RULES = {
+  Hyrox: /cinta de correr autopropulsada|máquina de esquí|remo de aire|trineo/i,
+  Crossfit: /crossfit|^rack|power rack|jaula de potencia|medio rack|multirack|bicicleta de aire|remo de aire|máquina de esquí|banco ghd|hiperextensión inversa|neumático|trineo/i,
+};
+const autoDisciplines = p => DISCIPLINES.filter(d => DISC_RULES[d].test(p.name || ""));
+const disciplinesOf = p => Array.isArray(p.disciplines) ? p.disciplines : autoDisciplines(p);
+const state = { disc: null, group: null, func: null, q: "", onlyStock: false, cart: loadCart(), open: new Set(), shown: PAGE, manage: false };
 
 function rebuild() {
   const prods = BASE.products.map(clone);
@@ -586,12 +594,13 @@ function toast(msg, ms = 3000) {
 }
 
 // ---------- Filters ----------
-function matches(p, { group = state.group, func = state.func } = {}) {
+function matches(p, { group = state.group, func = state.func, disc = state.disc } = {}) {
+  if (disc && !disciplinesOf(p).includes(disc)) return false;
   if (group && p.group !== group) return false;
   if (func && !(p.functions || []).includes(func)) return false;
   if (state.onlyStock && stockOf(p.id) === 0) return false;
   if (state.q) {
-    const hay = fold([p.model, p.name, p.name_cn, p.section, p.group, tr(p.section), tr(p.group), ...(p.functions || []), ...(p.functions || []).map(tr)].join(" "));
+    const hay = fold([p.model, p.name, p.name_cn, p.section, p.group, tr(p.section), tr(p.group), ...(p.functions || []), ...(p.functions || []).map(tr), ...disciplinesOf(p)].join(" "));
     if (!fold(state.q).split(/\s+/).every(t => hay.includes(t))) return false;
   }
   return true;
@@ -602,16 +611,23 @@ function renderFilters() {
     ...[...new Set(PRODUCTS.map(p => p.group))].filter(g => g && !GROUP_ORDER.includes(g))];
   const gRow = $("groupRow");
   gRow.innerHTML = '<span class="label">Grupo muscular</span>';
-  gRow.append(chip("Todos", null, state.group === null, PRODUCTS.filter(p => matches(p, { group: null, func: null })).length, v => { state.group = v; state.func = null; }));
-  groups.forEach(g => gRow.append(chip(tr(g), g, state.group === g, PRODUCTS.filter(p => matches(p, { group: g, func: null })).length, v => { state.group = v; state.func = null; })));
+  gRow.append(chip("Todos", null, state.group === null, PRODUCTS.filter(p => matches(p, { group: null, func: null, disc: null })).length, v => { state.group = v; state.func = null; state.disc = null; }));
+  groups.forEach(g => {
+    const n = PRODUCTS.filter(p => matches(p, { group: g, func: null, disc: null })).length;
+    if (n || state.group === g) gRow.append(chip(tr(g), g, state.group === g, n, v => { state.group = v; state.func = null; state.disc = null; }));
+  });
 
   const funcs = [...new Set(PRODUCTS.filter(p => !state.group || p.group === state.group).flatMap(p => p.functions || []))].sort((a, b) => tr(a).localeCompare(tr(b), "es"));
   const fRow = $("funcRow");
   fRow.innerHTML = '<span class="label">Función principal</span>';
-  fRow.append(chip("Todas", null, state.func === null, null, v => { state.func = v; }));
+  fRow.append(chip("Todas", null, state.func === null && state.disc === null, null, () => { state.func = null; state.disc = null; }));
+  DISCIPLINES.forEach(d => {   // Hyrox / Crossfit sit in this row but filter by discipline, not by function
+    const n = PRODUCTS.filter(p => matches(p, { func: null, disc: d })).length;
+    if (n || state.disc === d) fRow.append(chip(d, d, state.disc === d, n, v => { state.disc = v; state.func = null; }));
+  });
   funcs.forEach(f => {
-    const n = PRODUCTS.filter(p => matches(p, { func: f })).length;
-    if (n || state.func === f) fRow.append(chip(tr(f), f, state.func === f, n, v => { state.func = v; }));
+    const n = PRODUCTS.filter(p => matches(p, { func: f, disc: null })).length;
+    if (n || state.func === f) fRow.append(chip(tr(f), f, state.func === f, n, v => { state.func = v; state.disc = null; }));
   });
 }
 
@@ -655,6 +671,7 @@ function renderGrid() {
         <div class="name">${esc(p.name) || "&nbsp;"}</div>
         <div class="tags">
           ${p.group ? `<span class="tag">${esc(tr(p.group))}</span>` : ""}
+          ${disciplinesOf(p).map(d => `<span class="tag flag">${esc(d)}</span>`).join("")}
           ${(p.functions || []).map(f => `<span class="tag">${esc(tr(f))}</span>`).join("")}
           ${p.inCatalog === false ? '<span class="tag flag">No está en catálogo</span>' : ""}
         </div>
@@ -737,7 +754,7 @@ function openDetail(id) {
         <table>
           ${p.section ? `<tr><td>Sección</td><td>${esc(tr(p.section))}</td></tr>` : ""}
           <tr><td>Grupo muscular</td><td>${esc(tr(p.group)) || "—"}</td></tr>
-          <tr><td>Función</td><td>${(p.functions || []).map(f => esc(tr(f))).join(", ") || "—"}</td></tr>
+          <tr><td>Función</td><td>${[...disciplinesOf(p), ...(p.functions || []).map(tr)].map(esc).join(", ") || "—"}</td></tr>
           ${d.l || d.w || d.h ? `<tr><td>Dimensiones</td><td>Largo ${d.l || "?"} × ancho ${d.w || "?"} × alto ${d.h || "?"} mm</td></tr>` : ""}
           ${p.weight ? `<tr><td>Peso</td><td>${esc(String(p.weight).replace(".", ","))} kg</td></tr>` : ""}
           ${p.page ? `<tr><td>Página del catálogo</td><td>${esc(p.page)}</td></tr>` : ""}
@@ -807,7 +824,7 @@ function renderEditor(err = "") {
         <label class="f"><span>Alto (mm)</span><input name="h" type="number" value="${esc(d.h ?? "")}"></label>
         <span></span>
         <div class="f span4"><span>Función principal</span>
-          <div class="funcs">${funcs.map(f => `<label><input type="checkbox" name="func" value="${esc(f)}" ${(p.functions || []).includes(f) ? "checked" : ""}>${esc(tr(f))}</label>`).join("")}</div>
+          <div class="funcs">${DISCIPLINES.map(d => `<label><input type="checkbox" name="disc" value="${d}" ${disciplinesOf(p).includes(d) ? "checked" : ""}>${d}</label>`).join("")}${funcs.map(f => `<label><input type="checkbox" name="func" value="${esc(f)}" ${(p.functions || []).includes(f) ? "checked" : ""}>${esc(tr(f))}</label>`).join("")}</div>
           <input name="funcExtra" placeholder="Otra función (opcional, separadas por comas)">
         </div>
         <label class="f span4"><span>Características (una por línea)</span><textarea name="features">${esc((p.features || []).join("\n"))}</textarea></label>
@@ -853,6 +870,8 @@ function readForm() {
   p.functions = [...f.querySelectorAll('input[name="func"]:checked')].map(i => i.value)
     .concat(g("funcExtra").split(",").map(s => s.trim()).filter(Boolean));
   p.features = f.elements.features.value.split("\n").map(s => s.trim()).filter(Boolean);
+  const disc = [...f.querySelectorAll('input[name="disc"]:checked')].map(i => i.value);   // only stored when it differs from the name rules
+  if (disc.join() === autoDisciplines(p).join()) delete p.disciplines; else p.disciplines = disc;
   f.querySelectorAll("[data-v]").forEach(i => {
     const v = draft.stock[i.dataset.v];
     v[i.dataset.k] = i.dataset.k === "qty" ? Math.max(0, parseInt(i.value, 10) || 0) : i.value.trim();
