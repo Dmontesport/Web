@@ -3,7 +3,7 @@
 // - img/*.js and vid/*.js are named after a hash of their content, so a saved copy never goes stale: cache first.
 // Everything stays encrypted; the password is still needed to open the catalogue.
 const CACHE = "dmonte-v1";
-const SHELL = ["./", "./index.html", "./data.enc.js", "./manifest.webmanifest", "./icons/icon-192.png", "./icons/icon-512.png"];
+const SHELL = ["./", "./index.html", "./data.enc.js", "./manifest.webmanifest", "./icons/icon-192.png", "./icons/icon-512.png", "./lib/jspdf.umd.min.js"];
 
 self.addEventListener("install", e => {
   e.waitUntil(caches.open(CACHE).then(c => Promise.all(SHELL.map(u => c.add(u).catch(() => {})))));
