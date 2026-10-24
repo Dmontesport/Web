@@ -189,6 +189,21 @@
   .pk-opt[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-ink); font-weight: 600; }
   .prop .ptabs { grid-template-columns: repeat(2, 1fr); max-width: 360px; margin: 0; }
   .prop .calc-group > .fgrid { grid-column: 1 / -1; }
+  .prop { grid-template-columns: minmax(0, 1fr); }   /* the machine table scrolls inside, it never widens the window */
+  .prop > * { min-width: 0; }
+  /* tablets and phones: every machine line becomes a small card (name on top, units / price / discount / amount below) */
+  @media (max-width: 860px) {
+    .prop .ptable thead { display: none; }
+    .prop .ptable, .prop .ptable tbody { display: block; }
+    .prop .ptable tr { display: grid; grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr) auto; gap: 8px 10px; align-items: center; padding: 10px 12px; border-top: 1px solid var(--line); }
+    .prop .ptable tr:first-child { border-top: 0; }
+    .prop .ptable td { padding: 0; border: 0; min-width: 0; text-align: left; }
+    .prop .ptable td:first-child { grid-column: 1 / -1; }
+    .prop .ptable td.pq::before { content: "× "; color: var(--muted); }
+    .prop .ptable input, .prop .ptable td:nth-child(4) input { width: 100%; text-align: left; }
+    .prop .ptable .pamt { min-width: 76px; text-align: right; }
+    .prop .fgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
   .ptable-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; }
   .ptable { width: 100%; border-collapse: collapse; font-size: 13px; }
   .ptable th { text-align: right; color: var(--muted); font-weight: 500; font-size: 12px; padding: 9px 10px; background: var(--surface-2); white-space: nowrap; }
@@ -405,7 +420,7 @@
   .tabs button { border: 0; background: transparent; border-radius: 8px; padding: 6px 14px; font-size: 14px; font-weight: 500; color: var(--muted); }
   .tabs button[aria-selected="true"] { background: var(--surface); color: var(--ink); box-shadow: var(--shadow); }
   body.tab-nutri .catalog, body.tab-nutri .fscrim, body.tab-nutri .search-wrap, body.tab-nutri .manage-bar { display: none !important; }
-  body.tab-nutri #manageBtn, body.tab-nutri #cushionBtn { display: none !important; }
+  body.tab-nutri #manageBtn { display: none !important; }
   body.tab-nutri .actions { margin-left: auto; }
   .nutri { padding: 22px 28px 48px; display: grid; gap: 28px; }
   .nutri-hero { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 32px; align-items: center; }
@@ -604,6 +619,14 @@
   @media (max-width: 860px) {
     .calc-body { grid-template-columns: 1fr; }
   }
+  /* tablets: logo + buttons on the first row, tabs + search on the second */
+  @media (max-width: 1024px) {
+    header { flex-wrap: wrap; row-gap: 10px; }
+    .brand { order: 1; }
+    .actions { order: 2; margin-left: auto; }
+    .tabs { order: 3; }
+    .search-wrap { order: 4; flex: 1 1 240px; max-width: none; margin-left: 0; min-width: 0; }
+  }
   @media (max-width: 760px) {
     header { flex-wrap: wrap; padding: 10px 16px; gap: 8px; }
     .brand { gap: 8px; }
@@ -615,7 +638,9 @@
     .brand { order: 1; }
     .actions { order: 2; }
     .tabs { order: 3; }
-    .search-wrap { order: 4; max-width: none; flex: 1 1 0; min-width: 0; }
+    .tabs { flex: 1 1 100%; }
+    .tabs button { flex: 1; }
+    .search-wrap { flex-basis: 100%; }   /* phones: the search gets its own row */
     .nutri { padding: 14px 16px 32px; gap: 18px; }
     #vmCanvas { height: 52vh; }
     .vm-tools { position: static; justify-content: center; flex-wrap: wrap; padding: 8px 10px 10px; }
@@ -703,7 +728,6 @@
   <nav class="tabs" role="tablist" aria-label="Secciones"><button type="button" role="tab" data-tab="inicio" aria-selected="true">Inicio</button><button type="button" role="tab" data-tab="catalogo" aria-selected="false">Catálogo</button><button type="button" role="tab" data-tab="nutricion" aria-selected="false">Nutrición</button></nav>
   <label class="search-wrap"><svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input class="search" id="search" type="search" placeholder="Buscar modelo, nombre, músculo…"></label>
   <div class="actions">
-    <button class="hbtn" id="cushionBtn" title="Colores de tapizado"><svg class="i" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/></svg><span class="lbl">Tapizados</span></button>
     <button class="hbtn" id="manageBtn" aria-pressed="false" title="Gestionar"><svg class="i" viewBox="0 0 24 24"><path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16v4Z"/><path d="m13.5 6.5 4 4"/></svg><span class="lbl">Gestionar</span></button>
     <span id="langBox"></span>
     <button class="hbtn icon" id="themeBtn" title="Tema claro / oscuro"></button>
@@ -1021,6 +1045,7 @@ const UI_ROWS = [
   ["Uds.", "Qty", "Qtd.", "Uds."],
   ["Precio ud. (€)", "Unit price (€)", "Preço unit. (€)", "Prezo ud. (€)"],
   ["Dto. %", "Disc. %", "Desc. %", "Desc. %"],
+  ["Precio (€)", "Price (€)", "Preço (€)", "Prezo (€)"],
   ["Importe", "Amount", "Montante", "Importe"],
   ["Transporte (€)", "Transport (€)", "Transporte (€)", "Transporte (€)"],
   ["Montaje (€)", "Installation (€)", "Montagem (€)", "Montaxe (€)"],
@@ -1894,7 +1919,11 @@ function openDetail(id) {
   bindMedia();
   startVideo();
 }
-function closeModal() { if (VID.loading) VID.loading.abort(); stop3D(); stopPlanner(); $("modal").classList.remove("open"); $("modalBox").classList.remove("wide"); }
+function closeModal() {
+  if (VID.loading) VID.loading.abort();
+  $("modalBox").querySelectorAll("video").forEach(v => v.pause());   // a closed sheet must not keep playing
+  stop3D(); stopPlanner(); $("modal").classList.remove("open"); $("modalBox").classList.remove("wide");
+}
 
 // ---------- Editor ----------
 let draft = null;   // { id, isNew, product, stock }
@@ -2675,8 +2704,8 @@ function renderProposal() {
         <tbody>${prop.lines.map((l, i) => `<tr>
           <td><b>${esc(l.model)}</b> ${esc(l.name)}<small>Tapizado: ${esc(cushionName(l) || "por elegir")} · Estructura: ${esc(frameName(l) || "por elegir")}</small></td>
           <td class="pq">${l.qty}</td>
-          <td><input data-pl="${i}:price" inputmode="decimal" value="${esc(l.price)}" placeholder="0,00" aria-label="Precio por unidad de ${esc(l.model)}"></td>
-          <td><input data-pl="${i}:disc" inputmode="decimal" value="${esc(l.disc)}" placeholder="0" aria-label="Descuento de ${esc(l.model)}"></td>
+          <td><input data-pl="${i}:price" inputmode="decimal" value="${esc(l.price)}" placeholder="Precio (€)" aria-label="Precio por unidad de ${esc(l.model)}"></td>
+          <td><input data-pl="${i}:disc" inputmode="decimal" value="${esc(l.disc)}" placeholder="Dto. %" aria-label="Descuento de ${esc(l.model)}"></td>
           <td class="pamt" id="pamt${i}"></td></tr>`).join("")}</tbody></table></div>`
         : '<div class="empty" style="padding:24px">La selección está vacía. Añade máquinas para crear la propuesta.</div>'}
       <div class="pbottom">
@@ -4723,7 +4752,6 @@ $("vmEdit").onclick = openScreenEditor;
 $("packsBtn").onclick = openPacksEditor;
 $("videoImportBtn").onclick = openVideoImport;
 addEventListener("hashchange", () => { if (location.hash !== "#editor") setTab(tabFromHash()); });
-$("cushionBtn").onclick = openCushions;
 $("themeBtn").onclick = () => {
   const t = isDark() ? "light" : "dark";
   document.documentElement.dataset.theme = t;
