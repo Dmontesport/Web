@@ -738,6 +738,7 @@
 <div class="manage-bar">
     <span class="pending" id="pending"></span>
   <button class="btn accent small" id="publishBtn" hidden>Publicar cambios</button>
+  <button class="btn ghost small" id="undoPublishBtn" hidden title="Vuelve a dejar la web como estaba antes de la última publicación del catálogo">Deshacer última publicación</button>
   <button class="btn accent small" id="addBtn">+ Añadir máquina</button>
   <button class="btn primary small" id="saveFolder" title="Escribe data.js en la carpeta Catalogo_Web (Chrome / Edge)">Guardar en carpeta</button>
   <button class="btn small" id="downloadData">Descargar data.js</button>
@@ -3374,6 +3375,7 @@ function applyEditorMode() {
   $("manageBtn").hidden = web && !editor;
   if ($("manageBtn").hidden && state.manage) $("manageBtn").click();
   $("publishBtn").hidden = !(web && editor);
+  $("undoPublishBtn").hidden = !(web && editor);
   $("vmEdit").hidden = !canEdit();
   $("publishAppBtn").hidden = web || !!window.SINGLE_FILE;
   $("videoImportBtn").hidden = !(web && editor);
@@ -3456,6 +3458,10 @@ async function publishChanges() {
     if (JSON.parse(remote.slice(remote.indexOf("{"), remote.lastIndexOf("}") + 1)).data !== window.DMONTE_ENC.data)
       throw new Error("la web publicada ha cambiado desde que abriste esta página (quizá desde otro dispositivo). Usa “Exportar copia”, recarga la página, importa la copia y vuelve a publicar");
 
+    // Never publish a catalogue that lost machines nobody deleted on purpose
+    const deleted = Object.values(OVERRIDES).filter(o => o && o.deleted).length, lost = BASE.products.length - deleted - PRODUCTS.filter(p => BASE.products.some(b => b.id === p.id)).length;
+    if (lost > 0) throw new Error(`desaparecerían ${lost} máquinas que nadie ha borrado. Usa “Descartar cambios locales” y vuelve a importar con la última versión de la app`);
+
     const keys = WEB.keys, files = [], fresh = {}, used = new Set();
     const toEnc = async ref => {   // photos added in the editor are data: URLs -> new encrypted files
       if (isEnc(ref)) { used.add(ref.slice(4)); return ref; }
@@ -3504,6 +3510,39 @@ async function publishChanges() {
   } catch (e) {
     toast("No se pudo publicar: " + e.message + ".", 10000);
   } finally { btn.disabled = false; btn.textContent = "Publicar cambios"; }
+}
+
+// Puts back what the last “Publicar cambios” replaced: a new commit whose files are those of the commit before it
+async function undoLastPublish() {
+  const cfg = GH.cfg();
+  if (!cfg) return openGhSetup();
+  const btn = $("undoPublishBtn");
+  try {
+    const ref = await GH.api(`/git/ref/heads/${encodeURIComponent(cfg.branch)}`, {}, cfg);
+    // the last catalogue publish; app updates after it only touch index.html and the app files, so they stay
+    const recent = await GH.api(`/commits?sha=${encodeURIComponent(cfg.branch)}&per_page=20`, {}, cfg);
+    const i = recent.findIndex(c => /^(Actualizar catálogo|Deshacer:)/.test(c.commit.message));
+    if (i < 0 || /^Deshacer:/.test(recent[i].commit.message)) return toast("No hay ninguna publicación del catálogo reciente que deshacer.", 7000);
+    if (recent.slice(0, i).some(c => !/^Actualizar app/.test(c.commit.message))) return toast("Después de esa publicación hubo otros cambios en la web, así que no se puede deshacer desde aquí.", 8000);
+    const last = await GH.api(`/commits/${recent[i].sha}`, {}, cfg);
+    const msg = last.commit.message.split("\n")[0];
+    const when = new Date(last.commit.author.date).toLocaleString("es-ES");
+    if (!confirm(`¿Deshacer la última publicación del catálogo (“${msg}”, ${when})? La web vuelve a quedar como estaba justo antes, con sus máquinas y fotos.`)) return;
+    btn.disabled = true; btn.textContent = "Deshaciendo…";
+    const parent = await GH.api(`/git/commits/${last.parents[0].sha}`, {}, cfg);
+    const before = await GH.api(`/git/trees/${parent.tree.sha}?recursive=1`, {}, cfg);
+    const shaBefore = Object.fromEntries(before.tree.map(t => [t.path, t.sha]));
+    const files = last.files || [];
+    if (files.length >= 300) throw new Error("la publicación cambió demasiados archivos para deshacerla desde aquí");
+    const tree = files.map(f => ({ path: f.filename, mode: "100644", type: "blob", sha: f.status === "added" ? null : shaBefore[f.previous_filename || f.filename] || null }));
+    const head = await GH.api(`/git/commits/${ref.object.sha}`, {}, cfg);
+    const t = await GH.api("/git/trees", { method: "POST", body: JSON.stringify({ base_tree: head.tree.sha, tree }) }, cfg);
+    const c = await GH.api("/git/commits", { method: "POST", body: JSON.stringify({ message: `Deshacer: ${msg}`, tree: t.sha, parents: [ref.object.sha] }) }, cfg);
+    await GH.api(`/git/refs/heads/${encodeURIComponent(cfg.branch)}`, { method: "PATCH", body: JSON.stringify({ sha: c.sha }) }, cfg);
+    toast("Publicación deshecha ✓. En unos minutos la web vuelve a estar como antes; recarga la página entonces.", 10000);
+  } catch (e) {
+    toast("No se pudo deshacer: " + e.message + ".", 10000);
+  } finally { btn.disabled = false; btn.textContent = "Deshacer última publicación"; }
 }
 
 // Catalogo_Web folder handle (stored when first chosen); asks for permission or the folder when needed
@@ -4761,6 +4800,7 @@ $("themeBtn").onclick = () => {
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", renderThemeBtn);
 $("buildWeb").onclick = openBuildWeb;
 $("publishBtn").onclick = publishChanges;
+$("undoPublishBtn").onclick = undoLastPublish;
 $("publishAppBtn").onclick = publishApp;
 $("ghSetupBtn").onclick = openGhSetup;
 addEventListener("hashchange", () => { if (location.hash === "#editor" && !window.SINGLE_FILE) openGhSetup(); });
@@ -4773,7 +4813,14 @@ $("importBackup").onchange = async e => {
   const f = e.target.files[0]; if (!f) return;
   try {
     const data = JSON.parse(await f.text());
-    for (const [id, v] of Object.entries(data)) { OVERRIDES[id] = v; await idb.put(id, v); }
+    for (let [id, v] of Object.entries(data)) {
+      if (v && v.patch) {   // only some fields for a machine already in the catalogue (e.g. its Alibaba prices)
+        if (!byId[id]) continue;
+        v = { product: { ...clone(byId[id]), ...v.patch }, stock: clone(STOCK[id] || []) };
+      }
+      if (!id.startsWith("__") && !(v && (v.deleted || (v.product && v.product.id)))) continue;   // anything else would empty the machine
+      OVERRIDES[id] = v; await idb.put(id, v);
+    }
     rebuild(); render(); toast(`Importados ${Object.keys(data).length} cambios.`);
   } catch { toast("Ese archivo no es una copia válida."); }
   e.target.value = "";
